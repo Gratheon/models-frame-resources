@@ -9,7 +9,7 @@ dependencies:
   - numpy=1.18
   - scipy=1.4
   - pip:
-    - opencv-python==3.4.2.16
+    - opencv-python==3.4.3.18
     - tqdm==4.42
     - h5py==2.10.0
     - Pillow==9.4.0
