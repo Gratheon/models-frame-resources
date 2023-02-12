@@ -1,0 +1,14 @@
+version: '3.9'
+services:
+  models-frame-resources:
+    build: .
+    environment:
+      ENV_ID: dev
+      SERVICE_NAME: models-frame-resources
+    ports:
+      - 8540:8540
+    network_mode: bridge
+    networks:
+      - gratheon
+networks:
+  gratheon:
