@@ -2,11 +2,14 @@ version: '3.9'
 services:
   models-frame-resources:
     build: .
+    command: python3.7 /app/src/DeepBee/software/app.py
     environment:
       ENV_ID: dev
       SERVICE_NAME: models-frame-resources
     ports:
       - 8540:8540
+    volumes:
+      - .:/app/
     network_mode: bridge
     networks:
       - gratheon

@@ -9,8 +9,14 @@ Created on Tue Mar 27 21:34:46 2018
 import numpy as np
 import cv2
 import os
-from keras.models import load_model
+import h5py
+
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
+
+from keras.models import load_model, model_from_json
 from keras.applications.imagenet_utils import preprocess_input
+
 import math
 from tqdm import tqdm
 from collections import Counter
@@ -25,7 +31,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 PATH = os.path.dirname(os.path.realpath("__file__"))
 
 PATH_IMAGES = os.path.join(*list(PurePath("../original_images/").parts))
-PATH_MODEL = "model"
+# PATH_MODEL = "/app/src/DeepBee/software/model/"
+# PATH_MODEL = "model"
 PATH_DETECTIONS = os.path.join(*list(PurePath("../annotations/detections/").parts))
 PATH_PREDICTIONS = os.path.join(*list(PurePath("../annotations/predictions/").parts))
 PATH_OUT_IMAGE = os.path.join(*list(PurePath("../output/labeled_images/").parts))
@@ -407,35 +414,34 @@ def find_image_names():
                 l_images.append(full_path.replace(PATH_IMAGES, ""))
     return l_images
 
+ROOT = '/app'
+# ROOT = '/home/artjom/git/models-frame-resources/'
 
 def create_detections():
-    dic_model = load_dict_model(PATH_MODEL)
+    #PATH_MODEL = f"{ROOT}/src/DeepBee/software/model/segmentation.h5"
+    PATH_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/segmentation.model.json'
+    PATH_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/segmentation.weights.h5'
     images = find_image_names()
-    m_border = load_model(dic_model["border"], compile=False)
+    # m_border = load_model(PATH_MODEL, compile=False)
+    # m_border.save_weights(PATH_MODEL_WEIGHTS)
+    
+    # model_json = m_border.to_json()
+    # with open(PATH_MODEL_JSON, 'w') as json_file:
+    #     json_file.write(model_json)
+
+    with open(PATH_MODEL_JSON, 'r') as json_file:
+        model_json = json_file.read()
+        model = model_from_json(model_json)
+        model.load_weights(PATH_MODEL_WEIGHTS)
 
     with tqdm(total=len(images)) as j:
         for i in images:
             img = cv2.imread(os.path.join(PATH_IMAGES, i))
-            mask, cnt = segmentation(img, m_border)
+            mask, cnt = segmentation(img, model)
             find_circles(i, img, mask, cnt)
             j.update(1)
 
-
-def load_dict_model(path):
-    # gets all files inside the path
-    files = os.listdir(path)
-    model = {}
-
-    model["model_h5"] = os.path.join(
-        path, list(filter(lambda x: "classification" in x, files))[0]
-    )
-
-    model["border"] = os.path.join(
-        path, list(filter(lambda x: "segmentation" in x, files))[0]
-    )
-
-    model["labels"] = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
-    return model
+LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
 
 
 def classify_images():
@@ -448,16 +454,21 @@ def classify_images():
         for i in images
     ]
 
-    dict_model = load_dict_model(PATH_MODEL)
-    net = load_model(dict_model["model_h5"])
+    PATH_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/classification.model.json'
+    PATH_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/classification.weights.h5'
+    
+    with open(PATH_MODEL_JSON, 'r') as json_file:
+        model_json = json_file.read()
+        model = model_from_json(model_json)
+        model.load_weights(PATH_MODEL_WEIGHTS)
 
     with tqdm(total=len(images)) as t:
         for i, j in zip(images, detections):
-            classify_image(i, j, dict_model["labels"], net, img_size, None)
+            classify_image(i, j, LABELS, model, img_size, None)
             t.update(1)
 
 
-def main():
+def run():
     cross_plataform_directory()
     print("\nDetecting cells...")
     create_detections()
@@ -468,4 +479,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run()
