@@ -5,6 +5,8 @@ services:
     command: python3.7 /app/src/DeepBee/software/app.py
     environment:
       ENV_ID: dev
+      CUDA_VISIBLE_DEVICES: 0
+      TF_FORCE_GPU_ALLOW_GROWTH: false
       SERVICE_NAME: models-frame-resources
     ports:
       - 8540:8540

@@ -42,11 +42,12 @@ RUN apt-get install -y python3.7-distutils python3-apt
 #RUN dpkg -i --force-overwrite /var/cache/apt/archives/python3.7-distutils_3.7.9-1+focal1_all.deb
 #RUN apt-get -f install 
 
+RUN apt-get install -y libsm6 libxext6 libxrender-dev
+
 # https://github.com/yaroslavvb/tensorflow-community-wheels/issues/206
 COPY requirements.txt .
 RUN python3.7 -m pip install -r requirements.txt
 
-# RUN python3.7 -m pip uninstall -y tensorflow
 # COPY tensorflow-2.7.0-cp37-cp37m-linux_x86_64.whl .
 # RUN python3.7 -m pip install --ignore-installed --upgrade tensorflow-2.7.0-cp37-cp37m-linux_x86_64.whl
 

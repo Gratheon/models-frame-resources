@@ -11,14 +11,16 @@ import cv2
 import os
 import h5py
 
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
+import keras.backend.tensorflow_backend as tb
+tb._SYMBOLIC_SCOPE.value = True
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
 
+# from tensorflow.keras.models import model_from_json, load_model
 from keras.models import load_model, model_from_json
 from keras.applications.imagenet_utils import preprocess_input
 
 import math
-from tqdm import tqdm
 from collections import Counter
 import datetime
 import warnings
@@ -30,34 +32,71 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 PATH = os.path.dirname(os.path.realpath("__file__"))
 
-PATH_IMAGES = os.path.join(*list(PurePath("../original_images/").parts))
+ROOT = '/app'
+# ROOT = '/Users/artjom/git/models-frame-resources/'
+# ROOT = '/home/artjom/git/models-frame-resources/'
+
+PATH_SEG_MODEL = f'{ROOT}/src/DeepBee/software/model/segmentation.h5'
+PATH_SEG_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/segmentation.model.json'
+PATH_SEG_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/segmentation.weights.h5'
+
+PATH_CL_MODEL = f'{ROOT}/src/DeepBee/software/model/classification.h5'
+PATH_CL_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/classification.model.json'
+PATH_CL_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/classification.weights.h5'
+
+PATH_IMAGES = f'{ROOT}/src/DeepBee/original_images/'
+PATH_DETECTIONS = f'{ROOT}/src/DeepBee/annotations/detections/'
+PATH_PREDICTIONS = f'{ROOT}/src/DeepBee/annotations/predictions/'
+PATH_OUT_IMAGE = f'{ROOT}/src/DeepBee/output/labeled_images/'
+PATH_OUT_CSV = f'{ROOT}/src/DeepBee/output/spreadsheet/'
+
+# PATH_IMAGES = os.path.join(*list(PurePath("../original_images/").parts))
 # PATH_MODEL = "/app/src/DeepBee/software/model/"
 # PATH_MODEL = "model"
-PATH_DETECTIONS = os.path.join(*list(PurePath("../annotations/detections/").parts))
-PATH_PREDICTIONS = os.path.join(*list(PurePath("../annotations/predictions/").parts))
-PATH_OUT_IMAGE = os.path.join(*list(PurePath("../output/labeled_images/").parts))
-PATH_OUT_CSV = os.path.join(*list(PurePath("../output/spreadsheet/").parts))
+# PATH_DETECTIONS = os.path.join(*list(PurePath("../annotations/detections/").parts))
+# PATH_PREDICTIONS = os.path.join(*list(PurePath("../annotations/predictions/").parts))
+# PATH_OUT_IMAGE = os.path.join(*list(PurePath("../output/labeled_images/").parts))
+# PATH_OUT_CSV = os.path.join(*list(PurePath("../output/spreadsheet/").parts))
 MIN_CONFIDENCE = 0.9995
 
 LEFT_BAR_SIZE = 480
 img_size = 224
 batch_size = 100
 
+# from keras import backend as K
+# # address some inteeface discrepancies when using tensorflow.keras
+# if "slice" not in K.__dict__ and K.backend() == "tensorflow":
+#     # this is a good indicator that we are using tensorflow.keras
 
-def cross_plataform_directory():
-    global PATH_IMAGES, PATH_DETECTIONS, PATH_PREDICTIONS, PATH_OUT_IMAGE, PATH_OUT_CSV
-    if "\\" in PATH_IMAGES:
-        PATH_IMAGES += "\\"
-        PATH_DETECTIONS += "\\"
-        PATH_PREDICTIONS += "\\"
-        PATH_OUT_IMAGE += "\\"
-        PATH_OUT_CSV += "\\"
-    elif "/" in PATH_IMAGES:
-        PATH_IMAGES += "/"
-        PATH_DETECTIONS += "/"
-        PATH_PREDICTIONS += "/"
-        PATH_OUT_IMAGE += "/"
-        PATH_OUT_CSV += "/"
+#     try:
+#         # at first try to monkey patch what we need, will only work if keras-team keras is installed
+#         from keras import backend as KKK
+
+#         try:
+#             K.__dict__.update(
+#                 is_tensor=KKK.is_tensor,
+#                 slice=KKK.slice,
+#             )
+#         finally:
+#             del KKK
+#     except ImportError:
+#         # if that doesn't work we do a dirty copy of the code required
+#         import tensorflow as tf
+#         from tensorflow.python.framework import ops as tf_ops
+
+
+#         def is_tensor(x):
+#             return isinstance(x, tf_ops._TensorLike) or tf_ops.is_dense_tensor_like(x)
+
+
+#         def slice(x, start, size):
+#             x_shape = K.int_shape(x)
+#             if (x_shape is not None) and (x_shape[0] is not None):
+#                 len_start = K.int_shape(start)[0] if is_tensor(start) else len(start)
+#                 len_size = K.int_shape(size)[0] if is_tensor(size) else len(size)
+#                 if not (len(K.int_shape(x)) == len_start == len_size):
+#                     raise ValueError('The dimension and the size of indices should match.')
+#             return tf.slice(x, start, size)
 
 
 def get_qtd_by_class(points, labels):
@@ -265,6 +304,8 @@ def segmentation(img, model):
     IMG_HEIGHT = 128
     IMG_CHANNELS = 3
 
+    print("Segmenting image")
+    print(img)
     original_shape = img.shape[:2]
 
     if original_shape != (4000, 6000):
@@ -280,6 +321,7 @@ def segmentation(img, model):
         for y in zip(pos_y, pos_y + 512)
     ]
 
+    print("Predicting slices")
     X = np.zeros((len(slices), IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
 
     for j, sl in enumerate(slices):
@@ -307,6 +349,7 @@ def segmentation(img, model):
         * 255
     )
 
+    print("Resizing image")
     if original_shape != (4000, 6000):
         reconstructed_mask = cv2.resize(
             reconstructed_mask, (original_shape[1], original_shape[0])
@@ -316,6 +359,7 @@ def segmentation(img, model):
     _, contours, _ = cv2.findContours(reconstructed_mask, 1, 2)
     max_cnt = contours[np.argmax(np.array([cv2.contourArea(i) for i in contours]))]
 
+    print("drawing contours")
     reconstructed_mask *= 0
     cv2.drawContours(reconstructed_mask, [max_cnt], 0, (255, 255, 255), -1)
 
@@ -414,38 +458,33 @@ def find_image_names():
                 l_images.append(full_path.replace(PATH_IMAGES, ""))
     return l_images
 
-ROOT = '/app'
-# ROOT = '/home/artjom/git/models-frame-resources/'
-
 def create_detections():
-    #PATH_MODEL = f"{ROOT}/src/DeepBee/software/model/segmentation.h5"
-    PATH_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/segmentation.model.json'
-    PATH_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/segmentation.weights.h5'
     images = find_image_names()
-    # m_border = load_model(PATH_MODEL, compile=False)
-    # m_border.save_weights(PATH_MODEL_WEIGHTS)
-    
-    # model_json = m_border.to_json()
-    # with open(PATH_MODEL_JSON, 'w') as json_file:
-    #     json_file.write(model_json)
 
-    with open(PATH_MODEL_JSON, 'r') as json_file:
+    print("loading model...")
+    # model = load_model(PATH_SEG_MODEL)
+    with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
         model = model_from_json(model_json)
-        model.load_weights(PATH_MODEL_WEIGHTS)
+        model.load_weights(PATH_SEG_MODEL_WEIGHTS)
 
-    with tqdm(total=len(images)) as j:
+        print("creating detections...")
+        print(images);
+        
         for i in images:
+            print("image: " + i)
             img = cv2.imread(os.path.join(PATH_IMAGES, i))
+            print("image read")
             mask, cnt = segmentation(img, model)
+            print("segmentation done")
             find_circles(i, img, mask, cnt)
-            j.update(1)
 
 LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
 
 
 def classify_images():
     images = sorted([os.path.join(PATH_IMAGES, i) for i in find_image_names()])
+    print(images)
 
     find_image_detections = lambda i: ".".join(i.split(".")[:-1]) + ".npy"
 
@@ -453,29 +492,24 @@ def classify_images():
         os.path.join(PATH_DETECTIONS, find_image_detections(i).replace(PATH_IMAGES, ""))
         for i in images
     ]
-
-    PATH_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/classification.model.json'
-    PATH_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/classification.weights.h5'
     
-    with open(PATH_MODEL_JSON, 'r') as json_file:
+    # model = load_model(PATH_CL_MODEL)
+    with open(PATH_CL_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
         model = model_from_json(model_json)
-        model.load_weights(PATH_MODEL_WEIGHTS)
+        model.load_weights(PATH_CL_MODEL_WEIGHTS)
 
-    with tqdm(total=len(images)) as t:
         for i, j in zip(images, detections):
             classify_image(i, j, LABELS, model, img_size, None)
-            t.update(1)
 
 
 def run():
-    cross_plataform_directory()
+    # cross_plataform_directory()
     print("\nDetecting cells...")
     create_detections()
     print("\nClassifying cells...")
     classify_images()
     print("Done.")
-    input("\nPress Enter to close...")
 
 
 if __name__ == "__main__":
