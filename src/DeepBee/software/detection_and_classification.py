@@ -268,6 +268,17 @@ def save_classification_npy(roi, date_saved, points_pred, im_name):
     np.save(array_name, array_to_save)
 
 def save_classification_json(roi, date_saved, points_pred, im_name):
+    """
+        x_coordinates
+        y_coordinates
+        radii
+        predicted_labels
+        new_class -  A new class label for each circle, based on a threshold confidence value.
+        st_use_retrain - A binary value (0 or 1) that indicates whether the circle should be used for retraining the model, based on the confidence value.
+        inside_roi - A binary value (0 or 1) that indicates whether the circle is inside the region of interest (ROI) of the input image.
+        vals_predictions - The maximum score value for each circle, obtained from the neural network predictions.
+
+    """
     # Save as JSON
     array_to_save = {
         'roi':roi, 
