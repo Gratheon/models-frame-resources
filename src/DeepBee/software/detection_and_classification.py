@@ -10,6 +10,7 @@ import numpy as np
 import cv2
 import os
 import h5py
+import json
 
 import keras.backend.tensorflow_backend as tb
 tb._SYMBOLIC_SCOPE.value = True
@@ -62,42 +63,6 @@ MIN_CONFIDENCE = 0.9995
 LEFT_BAR_SIZE = 480
 img_size = 224
 batch_size = 100
-
-# from keras import backend as K
-# # address some inteeface discrepancies when using tensorflow.keras
-# if "slice" not in K.__dict__ and K.backend() == "tensorflow":
-#     # this is a good indicator that we are using tensorflow.keras
-
-#     try:
-#         # at first try to monkey patch what we need, will only work if keras-team keras is installed
-#         from keras import backend as KKK
-
-#         try:
-#             K.__dict__.update(
-#                 is_tensor=KKK.is_tensor,
-#                 slice=KKK.slice,
-#             )
-#         finally:
-#             del KKK
-#     except ImportError:
-#         # if that doesn't work we do a dirty copy of the code required
-#         import tensorflow as tf
-#         from tensorflow.python.framework import ops as tf_ops
-
-
-#         def is_tensor(x):
-#             return isinstance(x, tf_ops._TensorLike) or tf_ops.is_dense_tensor_like(x)
-
-
-#         def slice(x, start, size):
-#             x_shape = K.int_shape(x)
-#             if (x_shape is not None) and (x_shape[0] is not None):
-#                 len_start = K.int_shape(start)[0] if is_tensor(start) else len(start)
-#                 len_size = K.int_shape(size)[0] if is_tensor(size) else len(size)
-#                 if not (len(K.int_shape(x)) == len_start == len_size):
-#                     raise ValueError('The dimension and the size of indices should match.')
-#             return tf.slice(x, start, size)
-
 
 def get_qtd_by_class(points, labels):
     points_filtered = points[points[:, 4] == 1, 3]
@@ -274,27 +239,66 @@ def classify_image(im_name, npy_name, labels, net, img_size, file):
         height, width, _ = image.shape
         roi = ((0, 0), (width, height))
 
-        array_to_save = np.array([roi, date_saved, points_pred])
+        save_classification_npy(roi, date_saved, points_pred, im_name)
+        save_classification_json(roi, date_saved, points_pred, im_name)
 
-        if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
-            dest_folder = os.path.join(
-                PATH_PREDICTIONS,
-                os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
-            )
-        else:
-            dest_folder = PATH_PREDICTIONS
-
-        array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"
-        array_name = os.path.join(dest_folder, array_name)
-
-        create_folder(array_name)
-        np.save(array_name, array_to_save)
-
+        # save as image
         out_img_name = os.path.join(PATH_OUT_IMAGE, im_name.replace(PATH_IMAGES, ""))
         create_folder(out_img_name)
         cv2.imwrite(out_img_name, cv2.resize(img_predita, (1500, 1000)))
     except Exception as e:
         print("\nFiled to classify image " + im_name, e)
+
+def save_classification_npy(roi, date_saved, points_pred, im_name):
+    # save as npy
+    array_to_save = np.array([roi, date_saved, points_pred])
+
+    if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
+        dest_folder = os.path.join(
+            PATH_PREDICTIONS,
+            os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
+        )
+    else:
+        dest_folder = PATH_PREDICTIONS
+
+    array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"
+    array_name = os.path.join(dest_folder, array_name)
+
+    create_folder(array_name)
+    np.save(array_name, array_to_save)
+
+def save_classification_json(roi, date_saved, points_pred, im_name):
+    # Save as JSON
+    array_to_save = {
+        'roi':roi, 
+        'date_saved':date_saved, 
+        'points_pred':points_pred
+    }
+
+    if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
+        dest_folder = os.path.join(
+            PATH_PREDICTIONS,
+            os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
+        )
+    else:
+        dest_folder = PATH_PREDICTIONS
+
+    array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"
+    array_name = os.path.join(dest_folder, array_name)
+
+    class NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return json.JSONEncoder.default(self, obj)
+
+    create_folder(array_name)
+    with open(array_name, "w") as f:
+        json.dump(array_to_save, f, 
+            cls=NumpyEncoder,
+            separators=(',', ':'), 
+            sort_keys=True, 
+            indent=4)
 
 
 def segmentation(img, model):
@@ -433,12 +437,21 @@ def find_circles(im_name, img, mask, cnt):
 
             points = points[mask[points[:, 1], points[:, 0]] > 0]
 
+        # save as npy
         np_name = [PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"]
         array_name = os.path.join(
             *[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + np_name
         )
         create_folder(array_name)
         np.save(array_name, points)
+
+        # save as json
+        json_name = [PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"]
+        json_path = os.path.join(*[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + json_name)
+        create_folder(json_path)
+
+        with open(json_path, 'w') as f:
+            json.dump(points.tolist(), f)
     except:
         print("Cell detection failed on image ", PurePath(im_name).parts[-1] + "\n")
 
