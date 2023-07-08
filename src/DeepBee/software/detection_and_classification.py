@@ -17,8 +17,10 @@ tb._SYMBOLIC_SCOPE.value = True
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
 
-# from tensorflow.keras.models import model_from_json, load_model
-from keras.models import load_model, model_from_json
+import tensorflow.python.keras.backend as K
+from tensorflow.keras.models import model_from_json, load_model
+# from keras.models import load_model, model_from_json
+
 from keras.applications.imagenet_utils import preprocess_input
 
 import math
@@ -31,6 +33,41 @@ from pathlib import PurePath
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+
+# address some inteeface discrepancies when using tensorflow.keras
+if "slice" not in K.__dict__ and K.backend() == "tensorflow":
+    # this is a good indicator that we are using tensorflow.keras
+
+    try:
+        # at first try to monkey patch what we need, will only work if keras-team keras is installed
+        from keras import backend as KKK
+
+        try:
+            K.__dict__.update(
+                is_tensor=KKK.is_tensor,
+                slice=KKK.slice,
+            )
+        finally:
+            del KKK
+    except ImportError:
+        # if that doesn't work we do a dirty copy of the code required
+        import tensorflow as tf
+        from tensorflow.python.framework import ops as tf_ops
+
+
+        def is_tensor(x):
+            return isinstance(x, tf_ops._TensorLike) or tf_ops.is_dense_tensor_like(x)
+
+
+        def slice(x, start, size):
+            x_shape = K.int_shape(x)
+            if (x_shape is not None) and (x_shape[0] is not None):
+                len_start = K.int_shape(start)[0] if is_tensor(start) else len(start)
+                len_size = K.int_shape(size)[0] if is_tensor(size) else len(size)
+                if not (len(K.int_shape(x)) == len_start == len_size):
+                    raise ValueError('The dimension and the size of indices should match.')
+            return tf.slice(x, start, size)
+        
 PATH = os.path.dirname(os.path.realpath("__file__"))
 
 ROOT = '/app'
@@ -45,11 +82,11 @@ PATH_CL_MODEL = f'{ROOT}/src/DeepBee/software/model/classification.h5'
 PATH_CL_MODEL_JSON = f'{ROOT}/src/DeepBee/software/model/classification.model.json'
 PATH_CL_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/classification.weights.h5'
 
-PATH_IMAGES = f'{ROOT}/src/DeepBee/original_images/'
-PATH_DETECTIONS = f'{ROOT}/src/DeepBee/annotations/detections/'
-PATH_PREDICTIONS = f'{ROOT}/src/DeepBee/annotations/predictions/'
-PATH_OUT_IMAGE = f'{ROOT}/src/DeepBee/output/labeled_images/'
-PATH_OUT_CSV = f'{ROOT}/src/DeepBee/output/spreadsheet/'
+PATH_IMAGES = f'{ROOT}/tmp/original_images/'
+PATH_DETECTIONS = f'{ROOT}/tmp/detections/'
+PATH_PREDICTIONS = f'{ROOT}/tmp/predictions/'
+PATH_OUT_IMAGE = f'{ROOT}/tmp/labeled_images/'
+PATH_OUT_CSV = f'{ROOT}/tmp/spreadsheet/'
 
 # PATH_IMAGES = os.path.join(*list(PurePath("../original_images/").parts))
 # PATH_MODEL = "/app/src/DeepBee/software/model/"
@@ -172,7 +209,7 @@ def extract_circles(
     return ROIs
 
 
-def classify_image(im_name, npy_name, labels, net, img_size, file):
+def classify_image(dir, im_name, npy_name, labels, net, img_size, file):
     try:
         if not os.path.isfile(im_name):
             raise
@@ -239,35 +276,36 @@ def classify_image(im_name, npy_name, labels, net, img_size, file):
         height, width, _ = image.shape
         roi = ((0, 0), (width, height))
 
-        save_classification_npy(roi, date_saved, points_pred, im_name)
-        save_classification_json(roi, date_saved, points_pred, im_name)
+        # save_classification_npy(dir, roi, date_saved, points_pred, im_name)
+        save_classification_json(dir, roi, date_saved, points_pred, im_name)
 
         # save as image
-        out_img_name = os.path.join(PATH_OUT_IMAGE, im_name.replace(PATH_IMAGES, ""))
-        create_folder(out_img_name)
+        out_img_name = dir+"out.jpg" # os.path.join(PATH_OUT_IMAGE, im_name.replace(PATH_IMAGES, ""))
+        # create_folder(out_img_name)
         cv2.imwrite(out_img_name, cv2.resize(img_predita, (1500, 1000)))
     except Exception as e:
         print("\nFiled to classify image " + im_name, e)
 
-def save_classification_npy(roi, date_saved, points_pred, im_name):
+def save_classification_npy(dir, roi, date_saved, points_pred, im_name):
     # save as npy
     array_to_save = np.array([roi, date_saved, points_pred])
 
-    if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
-        dest_folder = os.path.join(
-            PATH_PREDICTIONS,
-            os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
-        )
-    else:
-        dest_folder = PATH_PREDICTIONS
+    # if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
+    #     dest_folder = os.path.join(
+    #         PATH_PREDICTIONS,
+    #         os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
+    #     )
+    # else:
+    #     dest_folder = PATH_PREDICTIONS
 
-    array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"
-    array_name = os.path.join(dest_folder, array_name)
+    array_name = "/app/tmp/" + dir + "/class.npy"
+    # array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"
+    # array_name = os.path.join(dest_folder, array_name)
 
-    create_folder(array_name)
+    # create_folder(array_name)
     np.save(array_name, array_to_save)
 
-def save_classification_json(roi, date_saved, points_pred, im_name):
+def save_classification_json(dir, roi, date_saved, points_pred, im_name):
     """
         x_coordinates
         y_coordinates
@@ -286,16 +324,18 @@ def save_classification_json(roi, date_saved, points_pred, im_name):
         'points_pred':points_pred
     }
 
-    if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
-        dest_folder = os.path.join(
-            PATH_PREDICTIONS,
-            os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
-        )
-    else:
-        dest_folder = PATH_PREDICTIONS
+    # if PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]:
+    #     dest_folder = os.path.join(
+    #         PATH_PREDICTIONS,
+    #         os.path.join(*PurePath(im_name.replace(PATH_IMAGES, "")).parts[:-1]),
+    #     )
+    # else:
+    #     dest_folder = PATH_PREDICTIONS
 
-    array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"
-    array_name = os.path.join(dest_folder, array_name)
+    # array_name = PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"
+    # array_name = os.path.join(dest_folder, array_name)
+
+    array_name = dir + "result.json"
 
     class NumpyEncoder(json.JSONEncoder):
         def default(self, obj):
@@ -303,7 +343,7 @@ def save_classification_json(roi, date_saved, points_pred, im_name):
                 return obj.tolist()
             return json.JSONEncoder.default(self, obj)
 
-    create_folder(array_name)
+    # create_folder(array_name)
     with open(array_name, "w") as f:
         json.dump(array_to_save, f, 
             cls=NumpyEncoder,
@@ -320,7 +360,6 @@ def segmentation(img, model):
     IMG_CHANNELS = 3
 
     print("Segmenting image")
-    print(img)
     original_shape = img.shape[:2]
 
     if original_shape != (4000, 6000):
@@ -383,7 +422,7 @@ def segmentation(img, model):
     return reconstructed_mask, bounding_rect
 
 
-def find_circles(im_name, img, mask, cnt):
+def find_circles(logging, dir, img, mask, cnt):
     try:
         x, y, w, h = cnt
 
@@ -449,22 +488,24 @@ def find_circles(im_name, img, mask, cnt):
             points = points[mask[points[:, 1], points[:, 0]] > 0]
 
         # save as npy
-        np_name = [PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"]
-        array_name = os.path.join(
-            *[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + np_name
-        )
-        create_folder(array_name)
+        # np_name = [PurePath(im_name).parts[-1].split(".")[:-1][0] + ".npy"]
+        np_name = "out.npy"
+        # array_name = os.path.join(
+        #     *[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + np_name
+        # )
+        array_name = dir + np_name
+        # create_folder(array_name)
         np.save(array_name, points)
 
         # save as json
-        json_name = [PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"]
-        json_path = os.path.join(*[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + json_name)
-        create_folder(json_path)
+        json_name = "out.json" #[PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"]
+        json_path = dir + json_name #os.path.join(*[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + json_name)
+        # create_folder(json_path)
 
         with open(json_path, 'w') as f:
             json.dump(points.tolist(), f)
-    except:
-        print("Cell detection failed on image ", PurePath(im_name).parts[-1] + "\n")
+    except Exception as e:
+        logging.error("Cell detection failed on image ", e, dir)
 
 
 def create_folder(path):
@@ -473,49 +514,56 @@ def create_folder(path):
         os.makedirs(path)
 
 
-def find_image_names():
-    l_images = []
-    for path, subdirs, files in os.walk(PATH_IMAGES):
-        for name in files:
-            full_path = os.path.join(path, name)
-            if imghdr.what(full_path) is not None:
-                l_images.append(full_path.replace(PATH_IMAGES, ""))
-    return l_images
+# def find_image_names():
+#     l_images = []
+#     for path, subdirs, files in os.walk(PATH_IMAGES):
+#         for name in files:
+#             full_path = os.path.join(path, name)
+#             if imghdr.what(full_path) is not None:
+#                 l_images.append(full_path.replace(PATH_IMAGES, ""))
+#     return l_images
 
-def create_detections():
-    images = find_image_names()
+def create_detections(logging, source_filename, dir):
+    # images = find_image_names()
+    # images = [source_filename]
 
-    print("loading model...")
+    logging.info("loading model...")
     # model = load_model(PATH_SEG_MODEL)
     with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
+        logging.debug("loading model from file", PATH_SEG_MODEL_WEIGHTS)
         model = model_from_json(model_json)
         model.load_weights(PATH_SEG_MODEL_WEIGHTS)
 
-        print("creating detections...")
-        print(images);
+        logging.info("creating detections...")
+        # print(images);
         
-        for i in images:
-            print("image: " + i)
-            img = cv2.imread(os.path.join(PATH_IMAGES, i))
-            print("image read")
-            mask, cnt = segmentation(img, model)
-            print("segmentation done")
-            find_circles(i, img, mask, cnt)
+        # for i in images:
+        # print("image: " + i)
+        # img = cv2.imread(os.path.join(PATH_IMAGES, i))
+        img = cv2.imread(source_filename)
+        logging.info("image read")
+        mask, cnt = segmentation(img, model)
+        logging.info("segmentation done")
+        find_circles(logging, dir, img, mask, cnt)
 
 LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
 
 
-def classify_images():
-    images = sorted([os.path.join(PATH_IMAGES, i) for i in find_image_names()])
-    print(images)
+def classify_images(logging, source_filename, dir):
+    # images = sorted([os.path.join(PATH_IMAGES, i) for i in find_image_names()])
+    # print(images)
 
-    find_image_detections = lambda i: ".".join(i.split(".")[:-1]) + ".npy"
+    images = [source_filename]
 
-    detections = [
-        os.path.join(PATH_DETECTIONS, find_image_detections(i).replace(PATH_IMAGES, ""))
-        for i in images
-    ]
+    detections = [ dir + "out.npy"]
+
+    # find_image_detections = lambda i: ".".join(i.split(".")[:-1]) + ".npy"
+
+    # detections = [
+    #     os.path.join(PATH_DETECTIONS, find_image_detections(i).replace(PATH_IMAGES, ""))
+    #     for i in images
+    # ]
     
     # model = load_model(PATH_CL_MODEL)
     with open(PATH_CL_MODEL_JSON, 'r') as json_file:
@@ -524,17 +572,13 @@ def classify_images():
         model.load_weights(PATH_CL_MODEL_WEIGHTS)
 
         for i, j in zip(images, detections):
-            classify_image(i, j, LABELS, model, img_size, None)
+            classify_image(dir, i, j, LABELS, model, img_size, None)
 
 
-def run():
+def run(logging, source_filename, dir):
     # cross_plataform_directory()
-    print("\nDetecting cells...")
-    create_detections()
-    print("\nClassifying cells...")
-    classify_images()
-    print("Done.")
-
-
-if __name__ == "__main__":
-    run()
+    logging.info("Detecting cells...")
+    create_detections(logging, source_filename, dir)
+    logging.info("Classifying cells...")
+    classify_images(logging, source_filename, dir)
+    logging.info("Done")
