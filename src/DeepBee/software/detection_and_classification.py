@@ -194,14 +194,18 @@ def extract_circles(
     return ROIs
 
 
-def classify_image(dir, im_name, npy_name, labels, net, img_size, file):
+def classify_image(dir, im_name, npy_name, labels, net, img_size):
     try:
+        print("isfile")
         if not os.path.isfile(im_name):
             raise
         if not os.path.isfile(npy_name):
             raise
 
+        print("imread")
         image = cv2.imread(im_name)
+
+        print("cvtColor")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         points = np.load(npy_name)
@@ -209,12 +213,16 @@ def classify_image(dir, im_name, npy_name, labels, net, img_size, file):
         pt = np.copy(points)
         pt[:, 2] = pt[:, 2] // 2
 
+        print("extract_circles")
         blob_imgs = extract_circles(image, np.copy(pt), output_size=img_size)
         blob_imgs = np.asarray([i for i in blob_imgs])
+
+        print("preprocess_input")
         blob_imgs = preprocess_input(blob_imgs)
 
         scores = None
 
+        print("predict", len(blob_imgs))
         for chunk in [
             blob_imgs[x : x + batch_size] for x in range(0, len(blob_imgs), batch_size)
         ]:
@@ -232,37 +240,41 @@ def classify_image(dir, im_name, npy_name, labels, net, img_size, file):
             (np.copy(points), np.expand_dims(lb_predictions, axis=0).T)
         )
 
-        sum_predictions = Counter(lb_predictions)
-        lb = [j + " " + str(sum_predictions[i]) for i, j in enumerate(labels)]
+        # sum_predictions = Counter(lb_predictions)
+        # lb = [j + " " + str(sum_predictions[i]) for i, j in enumerate(labels)]
 
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        img_predita = draw_circles_labels(image, lb, points_pred)
+        # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        # img_predita = draw_circles_labels(image, lb, points_pred)
 
-        inside_roi = np.ones_like(points_pred[:, 3])
+        # inside_roi = np.ones_like(points_pred[:, 3])
         new_class = np.copy(points_pred[:, 3])
 
-        st_use_retrain = (vals_predictions > MIN_CONFIDENCE) * 1
+        # st_use_retrain = (vals_predictions > MIN_CONFIDENCE) * 1
 
         csl = np.vstack(
-            [i for i in [new_class, st_use_retrain, inside_roi, vals_predictions]]
+            [i for i in [new_class, 
+                        #  st_use_retrain, 
+                        #  inside_roi, 
+                         vals_predictions]]
         ).T
 
         points_pred = np.hstack((points_pred, csl))
 
-        if file is not None:
-            file.write(
-                ",".join(
-                    [im_name.split("/")[-1], *get_qtd_by_class(points_pred, labels)]
-                )
-                + "\n"
-            )
+        # if file is not None:
+        #     file.write(
+        #         ",".join(
+        #             [im_name.split("/")[-1], *get_qtd_by_class(points_pred, labels)]
+        #         )
+        #         + "\n"
+        #     )
 
-        date_saved = datetime.datetime.now().strftime("%d/%m/%y %H:%M:%S")
-        height, width, _ = image.shape
-        roi = ((0, 0), (width, height))
+        # date_saved = datetime.datetime.now().strftime("%d/%m/%y %H:%M:%S")
+        # height, width, _ = image.shape
+        # roi = ((0, 0), (width, height))
 
         # save_classification_npy(dir, roi, date_saved, points_pred, im_name)
-        save_classification_json(dir, roi, date_saved, points_pred, im_name)
+        print("save_classification_json")
+        save_classification_json(dir, points_pred) # roi, date_saved,
 
         # save as image
         # out_img_name = dir+"out.jpg" # os.path.join(PATH_OUT_IMAGE, im_name.replace(PATH_IMAGES, ""))
@@ -276,7 +288,7 @@ def save_classification_npy(dir, roi, date_saved, points_pred, im_name):
     array_name = "/app/tmp/" + dir + "/class.npy"
     np.save(array_name, array_to_save)
 
-def save_classification_json(dir, roi, date_saved, points_pred, im_name):
+def save_classification_json(dir, points_pred):
     """
         x_coordinates
         y_coordinates
@@ -289,12 +301,12 @@ def save_classification_json(dir, roi, date_saved, points_pred, im_name):
 
     """
     # Save as JSON
-    array_to_save = {
-        'roi':roi, 
-        'labels': LABELS,
-        'date_saved':date_saved, 
-        'points_pred':points_pred
-    }
+    # array_to_save = {
+    #     # 'roi':roi, 
+    #     'labels': LABELS,
+    #     # 'date_saved':date_saved, 
+    #     'points_pred':points_pred
+    # }
 
     array_name = dir + "result.json"
 
@@ -306,7 +318,7 @@ def save_classification_json(dir, roi, date_saved, points_pred, im_name):
 
     # create_folder(array_name)
     with open(array_name, "w") as f:
-        json.dump(array_to_save, f, 
+        json.dump(points_pred, f, 
             cls=NumpyEncoder,
             separators=(',', ':'), 
             sort_keys=True, 
@@ -319,6 +331,10 @@ def segmentation(img, model):
     IMG_WIDTH = 128
     IMG_HEIGHT = 128
     IMG_CHANNELS = 3
+
+    if img is None:
+       raise Exception("img is None")
+    
 
     print("Segmenting image")
     original_shape = img.shape[:2]
@@ -371,13 +387,15 @@ def segmentation(img, model):
         )
 
     # remove internal areas
+    print("findContours")
     _, contours, _ = cv2.findContours(reconstructed_mask, 1, 2)
     max_cnt = contours[np.argmax(np.array([cv2.contourArea(i) for i in contours]))]
 
-    print("drawing contours")
+    print("drawContours")
     reconstructed_mask *= 0
     cv2.drawContours(reconstructed_mask, [max_cnt], 0, (255, 255, 255), -1)
 
+    print("boundingRect")
     bounding_rect = cv2.boundingRect(max_cnt)  # x,y,w,h
 
     return reconstructed_mask, bounding_rect
@@ -478,7 +496,7 @@ def create_detections(logging, source_filename, dir):
 
         logging.info("creating detections...")
         img = cv2.imread(source_filename)
-        logging.info("image read")
+        logging.info("image read", source_filename)
         mask, cnt = segmentation(img, model)
         logging.info("segmentation done")
         find_circles(logging, dir, img, mask, cnt)
@@ -495,12 +513,15 @@ def classify_images(logging, source_filename, dir):
         model.load_weights(PATH_CL_MODEL_WEIGHTS)
 
         for i, j in zip(images, detections):
-            classify_image(dir, i, j, LABELS, model, img_size, None)
+            print("classify_image")
+            classify_image(dir, i, j, LABELS, model, img_size)
 
 
 def run(logging, source_filename, dir):
     logging.info("Detecting cells...")
     create_detections(logging, source_filename, dir)
+
     logging.info("Classifying cells...")
     classify_images(logging, source_filename, dir)
+
     logging.info("Done")

@@ -113,7 +113,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({'message': 'Error', 'result': e}).encode('utf-8'))
+                self.wfile.write(json.dumps({'message': 'Error', 'result': str(e)}).encode('utf-8'))
 
 # Create an HTTP server with the request handler
 server_address = ('', 8540)  # Listen on all available interfaces, port 8700
