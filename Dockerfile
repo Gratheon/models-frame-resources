@@ -45,7 +45,7 @@ RUN apt-get install -y python3.7-distutils python3-apt
 RUN apt-get install -y libsm6 libxext6 libxrender-dev
 
 # https://github.com/yaroslavvb/tensorflow-community-wheels/issues/206
-COPY requirements.txt .
+COPY . /app/
 RUN python3.7 -m pip install -r requirements.txt
 
 # COPY tensorflow-2.7.0-cp37-cp37m-linux_x86_64.whl .
@@ -54,3 +54,5 @@ RUN python3.7 -m pip install -r requirements.txt
 # RUN apt-get install -y python3-protobuf
 
 EXPOSE 8540
+
+CMD ["python3.7", "/app/server.py"]
