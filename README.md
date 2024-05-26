@@ -1,4 +1,4 @@
-## gratheon/models-frame-resources
+## Gratheon/models-frame-resources
 
 Based on DeepBee project. With some changes:
 - dockerization was added
@@ -6,9 +6,17 @@ Based on DeepBee project. With some changes:
 - inference is done one-by-one, injected from http server
 - inference results are stored in /app/tmp
 
-### DeepBee
-https://www.youtube.com/watch?v=yTYRx04Xr6E
+## Architecture
+### Services
+```mermaid
+flowchart LR
+image-splitter --"POST process frame \n given a payload in form-data" --> models-frame-resources
 
+```
+
+
+### Original DeepBee description
+- Presentation: https://www.youtube.com/watch?v=yTYRx04Xr6E
 - [Demo](https://www.youtube.com/watch?v=W47sMDIS9zc)
 - [Automatic detection and classification of honey bee comb cells using deep learning](https://www.sciencedirect.com/science/article/pii/S0168169919307690)
 
