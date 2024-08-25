@@ -46,7 +46,14 @@ RUN apt-get install -y libsm6 libxext6 libxrender-dev
 
 # https://github.com/yaroslavvb/tensorflow-community-wheels/issues/206
 COPY . /app/
+RUN python3.7 -m pip install --upgrade pip
+RUN python3.7 -m pip install --upgrade einops
+
+RUN python3.7 -m pip install Cython==0.29.37
+RUN python3.7 -m pip install numpy==1.19.3 --no-build-isolation
+#RUN python3.7 -m pip install --no-binary=h5py h5py==2.10.0
 RUN python3.7 -m pip install -r requirements.txt
+
 
 # COPY tensorflow-2.7.0-cp37-cp37m-linux_x86_64.whl .
 # RUN python3.7 -m pip install --ignore-installed --upgrade tensorflow-2.7.0-cp37-cp37m-linux_x86_64.whl

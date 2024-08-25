@@ -12,12 +12,12 @@ import os
 import h5py
 import json
 
-import keras.backend.tensorflow_backend as tb
-tb._SYMBOLIC_SCOPE.value = True
+# import tensorflow.keras.backend as tb
+# tb._SYMBOLIC_SCOPE.value = True
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
 
-import tensorflow.python.keras.backend as K
+import tensorflow.keras.backend as K
 from tensorflow.keras.models import model_from_json, load_model
 # from keras.models import load_model, model_from_json
 
@@ -35,38 +35,40 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
 # address some inteeface discrepancies when using tensorflow.keras
-if "slice" not in K.__dict__ and K.backend() == "tensorflow":
-    # this is a good indicator that we are using tensorflow.keras
+# if "slice" not in K.__dict__ and K.backend() == "tensorflow":
+#     # this is a good indicator that we are using tensorflow.keras
+#
+#     try:
+#         # at first try to monkey patch what we need, will only work if keras-team keras is installed
+# from keras import backend as KKK
+import tensorflow.compat.v2 as tf
 
-    try:
-        # at first try to monkey patch what we need, will only work if keras-team keras is installed
-        from keras import backend as KKK
+# try:
+K.__dict__.update(
+    is_tensor=tf.is_tensor,
+    slice=tf.slice,
+)
+# finally:
+#     del KKK
 
-        try:
-            K.__dict__.update(
-                is_tensor=KKK.is_tensor,
-                slice=KKK.slice,
-            )
-        finally:
-            del KKK
-    except ImportError:
-        # if that doesn't work we do a dirty copy of the code required
-        import tensorflow as tf
-        from tensorflow.python.framework import ops as tf_ops
-
-
-        def is_tensor(x):
-            return isinstance(x, tf_ops._TensorLike) or tf_ops.is_dense_tensor_like(x)
-
-
-        def slice(x, start, size):
-            x_shape = K.int_shape(x)
-            if (x_shape is not None) and (x_shape[0] is not None):
-                len_start = K.int_shape(start)[0] if is_tensor(start) else len(start)
-                len_size = K.int_shape(size)[0] if is_tensor(size) else len(size)
-                if not (len(K.int_shape(x)) == len_start == len_size):
-                    raise ValueError('The dimension and the size of indices should match.')
-            return tf.slice(x, start, size)
+#     except ImportError:
+#         # if that doesn't work we do a dirty copy of the code required
+#         import tensorflow as tf
+#         from tensorflow.python.framework import ops as tf_ops
+#
+#
+#         def is_tensor(x):
+#             return isinstance(x, tf_ops._TensorLike) or tf_ops.is_dense_tensor_like(x)
+#
+#
+#         def slice(x, start, size):
+#             x_shape = K.int_shape(x)
+#             if (x_shape is not None) and (x_shape[0] is not None):
+#                 len_start = K.int_shape(start)[0] if is_tensor(start) else len(start)
+#                 len_size = K.int_shape(size)[0] if is_tensor(size) else len(size)
+#                 if not (len(K.int_shape(x)) == len_start == len_size):
+#                     raise ValueError('The dimension and the size of indices should match.')
+#             return tf.slice(x, start, size)
         
 PATH = os.path.dirname(os.path.realpath("__file__"))
 
@@ -491,7 +493,7 @@ def create_detections(logging, source_filename, dir):
     with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
         logging.debug("loading model from file", PATH_SEG_MODEL_WEIGHTS)
-        model = model_from_json(model_json)
+        model = model_from_json(model_json, custom_objects={"K": K})
         model.load_weights(PATH_SEG_MODEL_WEIGHTS)
 
         logging.info("creating detections...")
@@ -509,7 +511,7 @@ def classify_images(logging, source_filename, dir):
     detections = [ dir + "out.npy"]
     with open(PATH_CL_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
-        model = model_from_json(model_json)
+        model = model_from_json(model_json, custom_objects={"K": K})
         model.load_weights(PATH_CL_MODEL_WEIGHTS)
 
         for i, j in zip(images, detections):

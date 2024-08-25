@@ -7,25 +7,25 @@ import time
 import subprocess
 import logging
 from src.DeepBee.software.detection_and_classification import run
-import config
+# import config
+#
+# import sentry_sdk
+# from sentry_sdk.integrations.logging import LoggingIntegration
 
-import sentry_sdk
-from sentry_sdk.integrations.logging import LoggingIntegration
-
-sentry_logging = LoggingIntegration(
-    level=logging.INFO,        # Capture info and above as breadcrumbs
-    event_level=logging.ERROR  # Send errors as events
-)
-sentry_sdk.init(
-    dsn=config.sentry_dsn,
-    integrations=[
-        sentry_logging,
-    ],
-    # Set traces_sample_rate to 1.0 to capture 100%
-    # of transactions for performance monitoring.
-    # We recommend adjusting this value in production.
-    traces_sample_rate=1.0
-)
+# sentry_logging = LoggingIntegration(
+#     level=logging.INFO,        # Capture info and above as breadcrumbs
+#     event_level=logging.ERROR  # Send errors as events
+# )
+# sentry_sdk.init(
+#     dsn=config.sentry_dsn,
+#     integrations=[
+#         sentry_logging,
+#     ],
+#     # Set traces_sample_rate to 1.0 to capture 100%
+#     # of transactions for performance monitoring.
+#     # We recommend adjusting this value in production.
+#     traces_sample_rate=1.0
+# )
 
 # Define the request handler class
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
