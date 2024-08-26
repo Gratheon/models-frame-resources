@@ -12,6 +12,7 @@ RUN apt-get update && apt-get upgrade -y
 
 RUN apt install -y software-properties-common
 RUN add-apt-repository ppa:deadsnakes/ppa
+
 RUN apt install -y python3.7
 
 RUN apt-get install -y python3-pip libglib2.0-0
@@ -27,6 +28,7 @@ RUN apt-get install -y python3-pip libglib2.0-0
 
 # Install python libs
 #RUN apt-get install -y python3-wheel python3-setuptools python3-pip
+
 RUN apt-get install -y python3-wheel
 RUN apt-get install -y python3-setuptools
 RUN apt-get install -y python3-pip
@@ -46,12 +48,20 @@ RUN apt-get install -y libsm6 libxext6 libxrender-dev
 
 # https://github.com/yaroslavvb/tensorflow-community-wheels/issues/206
 COPY . /app/
+
 RUN python3.7 -m pip install --upgrade pip
 RUN python3.7 -m pip install --upgrade einops
 
 RUN python3.7 -m pip install Cython==0.29.37
 RUN python3.7 -m pip install numpy==1.19.3 --no-build-isolation
 #RUN python3.7 -m pip install --no-binary=h5py h5py==2.10.0
+
+RUN groupadd -r www && useradd -r -g www www
+
+RUN mkdir /home/www
+RUN chown -R www:www /home/www
+RUN chown -R www:www /app
+USER www
 RUN python3.7 -m pip install -r requirements.txt
 
 
@@ -59,9 +69,6 @@ RUN python3.7 -m pip install -r requirements.txt
 # RUN python3.7 -m pip install --ignore-installed --upgrade tensorflow-2.7.0-cp37-cp37m-linux_x86_64.whl
 
 # RUN apt-get install -y python3-protobuf
-
-RUN groupadd -r www && useradd -r -g www www
-USER www
 
 EXPOSE 8540
 
