@@ -15,5 +15,3 @@ services:
     restart: always
     tty: true
     network_mode: host
-networks:
-  gratheon:
