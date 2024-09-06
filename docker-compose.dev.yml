@@ -1,7 +1,7 @@
 services:
   models-frame-resources:
     build: .
-    # command: python3.7 /app/server.py
+    command: python3.7 /app/server.py
     environment:
       ENV_ID: dev
       CUDA_VISIBLE_DEVICES: 0
