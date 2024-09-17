@@ -1,21 +1,30 @@
 ## Gratheon/models-frame-resources
 
 Based on DeepBee project. With some changes:
+
 - dockerization was added
 - http server was added
 - inference is done one-by-one, injected from http server
 - inference results are stored in /app/tmp
 
+## Development
+
+```bash
+just start
+```
+
 ## Architecture
+
 ### Services
+
 ```mermaid
 flowchart LR
 image-splitter --"POST process frame \n given a payload in form-data" --> models-frame-resources
 
 ```
 
-
 ### Original DeepBee description
+
 - Presentation: https://www.youtube.com/watch?v=yTYRx04Xr6E
 - [Demo](https://www.youtube.com/watch?v=W47sMDIS9zc)
 - [Automatic detection and classification of honey bee comb cells using deep learning](https://www.sciencedirect.com/science/article/pii/S0168169919307690)
@@ -26,18 +35,19 @@ image-splitter --"POST process frame \n given a payload in form-data" --> models
 
 ### Models
 
-* [Classification](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/DeepBee/software/model)
-* [Segmentation](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/DeepBee/software/model)
+- [Classification](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/DeepBee/software/model)
+- [Segmentation](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/DeepBee/software/model)
 
 ### Datasets
 
-* Classification
-    * Train: [images](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data), [labels](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data/resources);
-    * Test: [images](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data/resources), [labels](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data/resources);
-* Segmentation
-    * [Train + Test](https://data.mendeley.com/datasets/db35fj73x5/1)
+- Classification
+  - Train: [images](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data), [labels](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data/resources);
+  - Test: [images](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data/resources), [labels](https://github.com/AvsThiago/DeepBee-source/tree/release-0.1/src/data/resources);
+- Segmentation
+  - [Train + Test](https://data.mendeley.com/datasets/db35fj73x5/1)
 
 ### Citation
+
 ```
 Thiago S. Alves, M. Alice Pinto, Paulo Ventura, Cátia J. Neves, David G. Biron, Arnaldo C. Junior, Pedro L. De Paula Filho, Pedro J. Rodrigues,
 Automatic detection and classification of honey bee comb cells using deep learning,
