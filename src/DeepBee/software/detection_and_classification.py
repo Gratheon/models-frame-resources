@@ -29,6 +29,7 @@ import datetime
 import warnings
 import imghdr
 from pathlib import PurePath
+import io # Added for in-memory buffer handling
 
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -196,21 +197,26 @@ def extract_circles(
     return ROIs
 
 
-def classify_image(dir, im_name, npy_name, labels, net, img_size):
+# Corrected classify_image signature and removed obsolete file operations
+def classify_image(image, points, labels, net, img_size):
     try:
-        print("isfile")
-        if not os.path.isfile(im_name):
-            raise
-        if not os.path.isfile(npy_name):
-            raise
+        # Removed isfile checks, imread, cvtColor, and np.load
+        # print("isfile")
+        # if not os.path.isfile(im_name):
+        #     raise
+        # if not os.path.isfile(npy_name):
+        #     raise
+        # print("imread")
+        # image = cv2.imread(im_name) # Use passed image object
+        # print("cvtColor")
+        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # Assume image is already in correct format if needed, or convert here
+        # points = np.load(npy_name) # Use passed points array
 
-        print("imread")
-        image = cv2.imread(im_name)
-
-        print("cvtColor")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        points = np.load(npy_name)
+        # Ensure image is RGB if needed by extract_circles (assuming input is BGR from imdecode)
+        if len(image.shape) == 3 and image.shape[2] == 3:
+             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        else:
+             image_rgb = image # Keep as is if grayscale or already RGB
 
         pt = np.copy(points)
         pt[:, 2] = pt[:, 2] // 2
@@ -274,60 +280,26 @@ def classify_image(dir, im_name, npy_name, labels, net, img_size):
         # height, width, _ = image.shape
         # roi = ((0, 0), (width, height))
 
-        # save_classification_npy(dir, roi, date_saved, points_pred, im_name)
-        print("save_classification_json")
-        save_classification_json(dir, points_pred) # roi, date_saved,
+        # Removed save_classification_npy call
+        # Removed save_classification_json call
+        # print("save_classification_json")
+        # save_classification_json(dir, points_pred) # roi, date_saved,
 
-        # save as image
+        # Removed saving image
         # out_img_name = dir+"out.jpg" # os.path.join(PATH_OUT_IMAGE, im_name.replace(PATH_IMAGES, ""))
         # cv2.imwrite(out_img_name, cv2.resize(img_predita, (1500, 1000)))
     except Exception as e:
-        print("\nFiled to classify image " + im_name, e)
-
-def save_classification_npy(dir, roi, date_saved, points_pred, im_name):
-    # save as npy
-    array_to_save = np.array([roi, date_saved, points_pred])
-    array_name = "/app/tmp/" + dir + "/class.npy"
-    np.save(array_name, array_to_save)
-
-def save_classification_json(dir, points_pred):
-    """
-        x_coordinates
-        y_coordinates
-        radii
-        predicted_labels
-        new_class -  A new class label for each circle, based on a threshold confidence value.
-        st_use_retrain - A binary value (0 or 1) that indicates whether the circle should be used for retraining the model, based on the confidence value.
-        inside_roi - A binary value (0 or 1) that indicates whether the circle is inside the region of interest (ROI) of the input image.
-        vals_predictions - The maximum score value for each circle, obtained from the neural network predictions.
-
-    """
-    # Save as JSON
-    # array_to_save = {
-    #     # 'roi':roi, 
-    #     'labels': LABELS,
-    #     # 'date_saved':date_saved, 
-    #     'points_pred':points_pred
-    # }
-
-    array_name = dir + "result.json"
-
-    class NumpyEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            return json.JSONEncoder.default(self, obj)
-
-    # create_folder(array_name)
-    with open(array_name, "w") as f:
-        json.dump(points_pred, f, 
-            cls=NumpyEncoder,
-            separators=(',', ':'), 
-            sort_keys=True, 
-            indent=4)
+        print("\nFiled to classify image ", e) # Removed im_name
+    # Return the results instead of saving
+    return points_pred
 
 
-def segmentation(img, model):
+# Removed save_classification_npy function
+
+# Removed save_classification_json function
+
+
+def segmentation(img, model): # Ensure correct indentation and remove leftover comments
     IMG_WIDTH_DEST = 482
     IMG_HEIGHT_DEST = 482
     IMG_WIDTH = 128
@@ -403,7 +375,8 @@ def segmentation(img, model):
     return reconstructed_mask, bounding_rect
 
 
-def find_circles(logging, dir, img, mask, cnt):
+# Removed dir parameter from find_circles signature
+def find_circles(logging, img, mask, cnt):
     try:
         x, y, w, h = cnt
 
@@ -468,28 +441,32 @@ def find_circles(logging, dir, img, mask, cnt):
 
             points = points[mask[points[:, 1], points[:, 0]] > 0]
 
-        # save as npy
-        np_name = "out.npy"
-        array_name = dir + np_name
-        np.save(array_name, points)
+        # Removed saving npy file
+        # np_name = "out.npy"
+        # array_name = dir + np_name
+        # np.save(array_name, points)
 
-        # save as json
+        # Removed saving json file
         # json_name = "out.json" #[PurePath(im_name).parts[-1].split(".")[:-1][0] + ".json"]
         # json_path = dir + json_name #os.path.join(*[PATH_DETECTIONS] + list(PurePath(im_name).parts[:-1]) + json_name)
 
         # with open(json_path, 'w') as f:
         #     json.dump(points.tolist(), f)
     except Exception as e:
-        logging.error("Cell detection failed on image ", e, dir)
+        logging.error("Cell detection failed on image ", e) # Removed dir
+    # Return the detected points
+    return points
 
 
-def create_folder(path):
-    path = os.path.join(*PurePath(path).parts[:-1])
-    if not os.path.exists(path):
-        os.makedirs(path)
+# Removed create_folder function
+# def create_folder(path):
+#     path = os.path.join(*PurePath(path).parts[:-1])
+#     if not os.path.exists(path):
+#         os.makedirs(path)
 
-def create_detections(logging, source_filename, dir):
-    logging.info("loading model...")
+# Modified create_detections to accept image object instead of filename/dir
+def create_detections(logging, img):
+    logging.info("loading segmentation model...")
     with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
         logging.debug("loading model from file", PATH_SEG_MODEL_WEIGHTS)
@@ -497,33 +474,54 @@ def create_detections(logging, source_filename, dir):
         model.load_weights(PATH_SEG_MODEL_WEIGHTS)
 
         logging.info("creating detections...")
-        img = cv2.imread(source_filename)
-        logging.info("image read", source_filename)
+        # Removed: img = cv2.imread(source_filename)
+        # logging.info("image read", source_filename)
         mask, cnt = segmentation(img, model)
         logging.info("segmentation done")
-        find_circles(logging, dir, img, mask, cnt)
+        # Pass img object, remove dir, capture return value
+        points = find_circles(logging, img, mask, cnt) # Correctly removed dir argument
+        return points # Return detected points
 
 LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
 
 
-def classify_images(logging, source_filename, dir):
-    images = [source_filename]
-    detections = [ dir + "out.npy"]
+# Modified classify_images to accept image object and points array
+def classify_images(logging, img, points): # Correctly removed dir argument
+    # Removed: images = [source_filename]
+    # Removed: detections = [ dir + "out.npy"]
+    logging.info("loading classification model...")
     with open(PATH_CL_MODEL_JSON, 'r') as json_file:
         model_json = json_file.read()
         model = model_from_json(model_json, custom_objects={"K": K})
         model.load_weights(PATH_CL_MODEL_WEIGHTS)
 
-        for i, j in zip(images, detections):
-            print("classify_image")
-            classify_image(dir, i, j, LABELS, model, img_size)
+        # Removed loop, call classify_image directly
+        # for i, j in zip(images, detections):
+        print("classify_image")
+        # Pass img object, points array, and img_size
+        final_results = classify_image(img, points, LABELS, model, img_size) # Pass img_size
+        return final_results # Return classification results
 
 
-def run(logging, source_filename, dir):
+# Modified run function to accept image buffer
+def run(logging, image_buffer):
+    logging.info("Decoding image buffer...")
+    nparr = np.frombuffer(image_buffer, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        logging.error("Could not decode image from buffer")
+        return None # Or raise an exception
+
     logging.info("Detecting cells...")
-    create_detections(logging, source_filename, dir)
+    # Pass img object, capture points
+    points = create_detections(logging, img)
+    if points is None or len(points) == 0:
+         logging.info("No points detected.")
+         return [] # Return empty list if no detections
 
     logging.info("Classifying cells...")
-    classify_images(logging, source_filename, dir)
+    # Pass img object and points, capture final results
+    final_results = classify_images(logging, img, points)
 
     logging.info("Done")
+    return final_results # Return the final classification results
