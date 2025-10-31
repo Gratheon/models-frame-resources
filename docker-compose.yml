@@ -8,6 +8,9 @@ services:
       CUDA_VISIBLE_DEVICES: 0
       TF_FORCE_GPU_ALLOW_GROWTH: 'false'
       SERVICE_NAME: 'models-frame-resources'
+      # Reduce TensorFlow logging verbosity
+      TF_CPP_MIN_LOG_LEVEL: '2'
+      CUDA_VISIBLE_DEVICES: ''
     ports:
       - 8540:8540
     volumes:
