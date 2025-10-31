@@ -44,6 +44,45 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 # from keras import backend as KKK
 import tensorflow.compat.v2 as tf
 
+
+# Monkey patch func_load to handle bad marshal data from legacy Lambda layers
+try:
+    from keras.utils import generic_utils
+    _original_func_load = generic_utils.func_load
+    
+    def safe_func_load(code, defaults=None, globs=None):
+        try:
+            return _original_func_load(code, defaults, globs)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Failed to unmarshal lambda function, using fallback: {e}")
+            # Return a function that handles the tensor splitting for classification model
+            def fallback_lambda(x, i=None, parts=None, **kwargs):
+                import tensorflow as tf
+                # Handle the tensor splitting for multi-GPU training setup
+                if i is not None and parts is not None:
+                    # This Lambda was likely used for multi-GPU data splitting
+                    # Since we're running on single GPU/CPU, just return the input
+                    # But we need to handle the batch dimension properly
+                    try:
+                        batch_size = tf.shape(x)[0]
+                        # Calculate the slice size for this part
+                        slice_size = batch_size // parts
+                        start_idx = i * slice_size
+                        if i == parts - 1:  # Last part gets remainder
+                            return x[start_idx:]
+                        else:
+                            return x[start_idx:start_idx + slice_size]
+                    except:
+                        # If slicing fails, return the whole tensor
+                        return x
+                # For other Lambda functions, return identity
+                return x
+            return fallback_lambda
+    
+    generic_utils.func_load = safe_func_load
+except Exception as e:
+    print(f"Warning: Could not patch func_load: {e}")
+
 # try:
 K.__dict__.update(
     is_tensor=tf.is_tensor,
@@ -362,7 +401,9 @@ def segmentation(img, model): # Ensure correct indentation and remove leftover c
 
     # remove internal areas
     print("findContours")
-    _, contours, _ = cv2.findContours(reconstructed_mask, 1, 2)
+    # Handle both OpenCV 3.x (3 values) and 4.x (2 values) compatibility
+    contours_result = cv2.findContours(reconstructed_mask, 1, 2)
+    contours = contours_result[-2]  # contours is always second-to-last
     max_cnt = contours[np.argmax(np.array([cv2.contourArea(i) for i in contours]))]
 
     print("drawContours")

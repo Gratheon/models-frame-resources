@@ -1,7 +1,7 @@
 services:
   models-frame-resources:
     build: .
-    command: python3.7 /app/server.py
+    command: python /app/server.py
     environment:
       ENV_ID: dev
       CUDA_VISIBLE_DEVICES: 0
@@ -9,5 +9,7 @@ services:
       SERVICE_NAME: models-frame-resources
     ports:
       - 8540:8540
+    volumes:
+      - .:/app
     tty: true
     restart: always
