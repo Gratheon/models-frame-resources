@@ -322,7 +322,7 @@ def classify_image(image, points, labels, net, img_size):
             blob_imgs = blob_imgs.astype(np.float32) / 255.0
 
         # Ultra-small micro-batches
-        micro_batch_size = 4
+        micro_batch_size = 16
         all_scores = []
         
         print(f"Processing {len(blob_imgs)} cells in micro-batches of {micro_batch_size}")
@@ -401,8 +401,8 @@ def segmentation(img, model):
 
     print(f"Processing {len(slices)} slices in ultra-micro-batches")
     
-    # Ultra-small batches (2 slices at a time!)
-    ultra_micro_batch_size = 2
+    # Ultra-small batches
+    ultra_micro_batch_size = 8
     all_preds = []
     
     for batch_start in range(0, len(slices), ultra_micro_batch_size):
