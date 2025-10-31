@@ -4,9 +4,11 @@ services:
     command: python /app/server.py
     environment:
       ENV_ID: dev
-      CUDA_VISIBLE_DEVICES: 0
-      TF_FORCE_GPU_ALLOW_GROWTH: false
       SERVICE_NAME: models-frame-resources
+      # Memory optimization settings (removed conflicting CUDA and TF settings)
+      TF_FORCE_GPU_ALLOW_GROWTH: true
+      TF_CPP_MIN_LOG_LEVEL: 2
+      PYTHONUNBUFFERED: 1
     ports:
       - 8540:8540
     volumes:

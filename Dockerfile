@@ -7,6 +7,12 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV PROJ_DIR=/usr
 
+# Memory optimization environment variables
+ENV TF_FORCE_GPU_ALLOW_GROWTH=true
+ENV TF_CPP_MIN_LOG_LEVEL=2
+ENV PYTHONUNBUFFERED=1
+ENV TF_ENABLE_ONEDNN_OPTS=0
+
 # System dependencies for OpenCV and scientific stack (h5py/SciPy build requirements)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 libsm6 libxext6 libxrender1 build-essential \

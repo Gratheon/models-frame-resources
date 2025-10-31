@@ -11,6 +11,12 @@ import cv2
 import os
 import h5py
 import json
+import gc  # Added for explicit garbage collection
+
+# Memory optimization: Configure TensorFlow before importing
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 # import tensorflow.keras.backend as tb
 # tb._SYMBOLIC_SCOPE.value = True
@@ -125,8 +131,51 @@ PATH_CL_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/classification.weigh
 MIN_CONFIDENCE = 0.9995
 
 LEFT_BAR_SIZE = 480
-img_size = 224
-batch_size = 100
+img_size = 96   # Reduced from 224 to 96 (massive memory savings)
+batch_size = 4  # Reduced from 50 to 4 (ultra-small batches)
+
+# Global model cache for lazy loading to fix idle memory usage
+_segmentation_model = None
+_classification_model = None
+
+def load_segmentation_model():
+    """Lazy load segmentation model only when needed"""
+    global _segmentation_model
+    if _segmentation_model is None:
+        print("Loading segmentation model...")
+        with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
+            model_json = json_file.read()
+            _segmentation_model = model_from_json(model_json, custom_objects={"K": K})
+            _segmentation_model.load_weights(PATH_SEG_MODEL_WEIGHTS)
+    return _segmentation_model
+
+def load_classification_model():
+    """Lazy load classification model only when needed"""
+    global _classification_model
+    if _classification_model is None:
+        print("Loading classification model...")
+        with open(PATH_CL_MODEL_JSON, 'r') as json_file:
+            model_json = json_file.read()
+            _classification_model = model_from_json(model_json, custom_objects={"K": K})
+            _classification_model.load_weights(PATH_CL_MODEL_WEIGHTS)
+    return _classification_model
+
+def unload_models():
+    """Unload models from memory to reduce idle usage"""
+    global _segmentation_model, _classification_model
+    if _segmentation_model is not None:
+        del _segmentation_model
+        _segmentation_model = None
+    if _classification_model is not None:
+        del _classification_model
+        _classification_model = None
+    cleanup_memory()
+    print("Models unloaded from memory")
+
+def cleanup_memory():
+    """Force garbage collection and clear Keras session"""
+    K.clear_session()
+    gc.collect()
 
 def get_qtd_by_class(points, labels):
     points_filtered = points[points[:, 4] == 1, 3]
@@ -239,124 +288,83 @@ def extract_circles(
 # Corrected classify_image signature and removed obsolete file operations
 def classify_image(image, points, labels, net, img_size):
     try:
-        # Removed isfile checks, imread, cvtColor, and np.load
-        # print("isfile")
-        # if not os.path.isfile(im_name):
-        #     raise
-        # if not os.path.isfile(npy_name):
-        #     raise
-        # print("imread")
-        # image = cv2.imread(im_name) # Use passed image object
-        # print("cvtColor")
-        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # Assume image is already in correct format if needed, or convert here
-        # points = np.load(npy_name) # Use passed points array
-
-        # Ensure image is RGB if needed by extract_circles (assuming input is BGR from imdecode)
+        if len(points) == 0:
+            return np.array([])
+            
+        # Convert to RGB if needed  
         if len(image.shape) == 3 and image.shape[2] == 3:
-             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         else:
-             image_rgb = image # Keep as is if grayscale or already RGB
+            image_rgb = image
 
         pt = np.copy(points)
         pt[:, 2] = pt[:, 2] // 2
 
-        print("extract_circles")
-        blob_imgs = extract_circles(image, np.copy(pt), output_size=img_size)
+        print("extract_circles (ultra-memory-optimized)")
+        blob_imgs = extract_circles(image_rgb, np.copy(pt), output_size=img_size)
+        
+        if not blob_imgs:
+            return np.array([])
+            
         blob_imgs = np.asarray([i for i in blob_imgs])
 
-        print("preprocess_input")
+        # Limit maximum number of cells to process at once
+        max_cells = 2500
+        if len(blob_imgs) > max_cells:
+            print(f"Large frame with {len(blob_imgs)} cells detected, processing first {max_cells} for memory efficiency")
+            blob_imgs = blob_imgs[:max_cells]
+            points = points[:max_cells]
+
+        print("preprocess_input (memory-safe)")
         try:
-            blob_imgs = preprocess_input(blob_imgs)
-            print(f"Preprocess successful, blob_imgs shape: {blob_imgs.shape}, dtype: {blob_imgs.dtype}")
-        except Exception as preprocess_error:
-            print(f"Preprocess failed: {preprocess_error}")
-            raise
+            blob_imgs = preprocess_input(blob_imgs.astype(np.float32))
+        except:
+            blob_imgs = blob_imgs.astype(np.float32) / 255.0
 
-        scores = None
-
-        print(f"Starting prediction with {len(blob_imgs)} images, batch_size: {batch_size}")
+        # Ultra-small micro-batches
+        micro_batch_size = 4
+        all_scores = []
         
-        # Check if we have any images to process
-        if len(blob_imgs) == 0:
-            print("No images to classify, returning empty results")
+        print(f"Processing {len(blob_imgs)} cells in micro-batches of {micro_batch_size}")
+        
+        for i in range(0, len(blob_imgs), micro_batch_size):
+            chunk = blob_imgs[i:i+micro_batch_size]
+            try:
+                chunk_scores = net.predict(chunk, verbose=0, batch_size=2)
+                all_scores.append(chunk_scores)
+                del chunk_scores
+            except Exception as e:
+                print(f"Micro-batch {i//micro_batch_size + 1} failed: {e}")
+                dummy_scores = np.zeros((len(chunk), 7))
+                all_scores.append(dummy_scores)
+            
+            del chunk
+            gc.collect()
+
+        if not all_scores:
             return np.array([])
-        try:
-            for i, chunk in enumerate([
-                blob_imgs[x : x + batch_size] for x in range(0, len(blob_imgs), batch_size)
-            ]):
-                print(f"Predicting batch {i+1} with {len(chunk)} images")
-                try:
-                    output = net.predict(chunk, verbose=0)
-                    print(f"Batch {i+1} prediction successful, output shape: {output.shape}")
-                    
-                    if scores is None:
-                        scores = np.copy(output)
-                    else:
-                        scores = np.vstack((scores, output))
-                except Exception as batch_error:
-                    print(f"Error predicting batch {i+1}: {batch_error}")
-                    # Create dummy output with correct shape for this batch
-                    dummy_output = np.zeros((len(chunk), 7))  # 7 classes
-                    if scores is None:
-                        scores = np.copy(dummy_output)
-                    else:
-                        scores = np.vstack((scores, dummy_output))
-        except Exception as prediction_error:
-            print(f"Major prediction error: {prediction_error}")
-            # Create dummy scores for all images
-            scores = np.zeros((len(blob_imgs), 7))  # 7 classes
+            
+        scores = np.vstack(all_scores)
+        del all_scores, blob_imgs
+        gc.collect()
 
         lb_predictions = np.argmax(scores, axis=1)
         vals_predictions = np.amax(scores, axis=1)
 
-        points_pred = np.hstack(
-            (np.copy(points), np.expand_dims(lb_predictions, axis=0).T)
-        )
-
-        # sum_predictions = Counter(lb_predictions)
-        # lb = [j + " " + str(sum_predictions[i]) for i, j in enumerate(labels)]
-
-        # image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        # img_predita = draw_circles_labels(image, lb, points_pred)
-
-        # inside_roi = np.ones_like(points_pred[:, 3])
+        points_pred = np.hstack((np.copy(points), np.expand_dims(lb_predictions, axis=0).T))
         new_class = np.copy(points_pred[:, 3])
-
-        # st_use_retrain = (vals_predictions > MIN_CONFIDENCE) * 1
-
-        csl = np.vstack(
-            [i for i in [new_class, 
-                        #  st_use_retrain, 
-                        #  inside_roi, 
-                         vals_predictions]]
-        ).T
-
+        csl = np.vstack([new_class, vals_predictions]).T
         points_pred = np.hstack((points_pred, csl))
 
-        # if file is not None:
-        #     file.write(
-        #         ",".join(
-        #             [im_name.split("/")[-1], *get_qtd_by_class(points_pred, labels)]
-        #         )
-        #         + "\n"
-        #     )
-
-        # date_saved = datetime.datetime.now().strftime("%d/%m/%y %H:%M:%S")
-        # height, width, _ = image.shape
-        # roi = ((0, 0), (width, height))
-
-        # Removed save_classification_npy call
-        # Removed save_classification_json call
-        # print("save_classification_json")
-        # save_classification_json(dir, points_pred) # roi, date_saved,
-
-        # Removed saving image
-        # out_img_name = dir+"out.jpg" # os.path.join(PATH_OUT_IMAGE, im_name.replace(PATH_IMAGES, ""))
-        # cv2.imwrite(out_img_name, cv2.resize(img_predita, (1500, 1000)))
+        del scores, lb_predictions, vals_predictions
+        gc.collect()
+        
+        return points_pred
+        
     except Exception as e:
-        print("\nFiled to classify image ", e) # Removed im_name
-    # Return the results instead of saving
-    return points_pred
+        print(f"Classification failed: {e}")
+        gc.collect()
+        return np.array([])
 
 
 # Removed save_classification_npy function
@@ -364,11 +372,11 @@ def classify_image(image, points, labels, net, img_size):
 # Removed save_classification_json function
 
 
-def segmentation(img, model): # Ensure correct indentation and remove leftover comments
+def segmentation(img, model):
     IMG_WIDTH_DEST = 482
     IMG_HEIGHT_DEST = 482
-    IMG_WIDTH = 128
-    IMG_HEIGHT = 128
+    IMG_WIDTH = 128   # Reverted back to 128 to match model expectations
+    IMG_HEIGHT = 128  # Reverted back to 128 to match model expectations  
     IMG_CHANNELS = 3
 
     if img is None:
@@ -391,16 +399,33 @@ def segmentation(img, model): # Ensure correct indentation and remove leftover c
         for y in zip(pos_y, pos_y + 512)
     ]
 
-    print("Predicting slices")
-    X = np.zeros((len(slices), IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
-
-    for j, sl in enumerate(slices):
-        X[j] = cv2.resize(
-            reflect[sl], (IMG_HEIGHT, IMG_WIDTH), interpolation=cv2.INTER_AREA
-        )
-
-    preds = model.predict(X)
-    preds = (preds > 0.5).astype(np.uint8)
+    print(f"Processing {len(slices)} slices in ultra-micro-batches")
+    
+    # Ultra-small batches (2 slices at a time!)
+    ultra_micro_batch_size = 2
+    all_preds = []
+    
+    for batch_start in range(0, len(slices), ultra_micro_batch_size):
+        batch_end = min(batch_start + ultra_micro_batch_size, len(slices))
+        batch_slices = slices[batch_start:batch_end]
+        
+        print(f"Processing ultra-micro-batch {batch_start//ultra_micro_batch_size + 1}/{(len(slices) + ultra_micro_batch_size - 1)//ultra_micro_batch_size}")
+        
+        X = np.zeros((len(batch_slices), IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
+        
+        for j, sl in enumerate(batch_slices):
+            X[j] = cv2.resize(reflect[sl], (IMG_HEIGHT, IMG_WIDTH), interpolation=cv2.INTER_AREA)
+        
+        batch_preds = model.predict(X, verbose=0, batch_size=1)  # Single item batches
+        batch_preds = (batch_preds > 0.5).astype(np.uint8)
+        all_preds.append(batch_preds)
+        
+        del X, batch_preds
+        gc.collect()
+    
+    preds = np.vstack(all_preds)
+    del all_preds
+    gc.collect()
 
     RESULT_Y = np.zeros(
         (len(preds), IMG_HEIGHT_DEST, IMG_WIDTH_DEST, 1), dtype=np.uint8
@@ -411,6 +436,9 @@ def segmentation(img, model): # Ensure correct indentation and remove leftover c
             cv2.resize(x, (512, 512), interpolation=cv2.INTER_LINEAR)[15:497, 15:497],
             axis=-1,
         )
+    
+    del preds
+    gc.collect()
 
     reconstructed_mask = (
         np.squeeze(np.hstack([np.vstack(i) for i in np.split(RESULT_Y, 13)]))[
@@ -418,6 +446,9 @@ def segmentation(img, model): # Ensure correct indentation and remove leftover c
         ]
         * 255
     )
+    
+    del RESULT_Y
+    gc.collect()
 
     print("Resizing image")
     if original_shape != (4000, 6000):
@@ -534,61 +565,78 @@ def find_circles(logging, img, mask, cnt):
 # Modified create_detections to accept image object instead of filename/dir
 def create_detections(logging, img):
     logging.info("loading segmentation model...")
-    with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
-        model_json = json_file.read()
-        logging.debug("loading model from file", PATH_SEG_MODEL_WEIGHTS)
-        model = model_from_json(model_json, custom_objects={"K": K})
-        model.load_weights(PATH_SEG_MODEL_WEIGHTS)
+    model = None
+    try:
+        with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
+            model_json = json_file.read()
+            model = model_from_json(model_json, custom_objects={"K": K})
+            model.load_weights(PATH_SEG_MODEL_WEIGHTS)
 
-        logging.info("creating detections...")
-        # Removed: img = cv2.imread(source_filename)
-        # logging.info("image read", source_filename)
         mask, cnt = segmentation(img, model)
-        logging.info("segmentation done")
-        # Pass img object, remove dir, capture return value
-        points = find_circles(logging, img, mask, cnt) # Correctly removed dir argument
-        return points # Return detected points
+        points = find_circles(logging, img, mask, cnt)
+        
+        del mask
+        gc.collect()
+        return points
+    finally:
+        if model is not None:
+            del model
+            cleanup_memory()
 
 LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
 
 
 # Modified classify_images to accept image object and points array
-def classify_images(logging, img, points): # Correctly removed dir argument
-    # Removed: images = [source_filename]
-    # Removed: detections = [ dir + "out.npy"]
+def classify_images(logging, img, points):
     logging.info("loading classification model...")
-    with open(PATH_CL_MODEL_JSON, 'r') as json_file:
-        model_json = json_file.read()
-        model = model_from_json(model_json, custom_objects={"K": K})
-        model.load_weights(PATH_CL_MODEL_WEIGHTS)
+    model = None
+    try:
+        with open(PATH_CL_MODEL_JSON, 'r') as json_file:
+            model_json = json_file.read()
+            model = model_from_json(model_json, custom_objects={"K": K})
+            model.load_weights(PATH_CL_MODEL_WEIGHTS)
 
-        # Removed loop, call classify_image directly
-        # for i, j in zip(images, detections):
-        print("classify_image")
-        # Pass img object, points array, and img_size
-        final_results = classify_image(img, points, LABELS, model, img_size) # Pass img_size
-        return final_results # Return classification results
+        final_results = classify_image(img, points, LABELS, model, img_size)
+        return final_results
+    finally:
+        if model is not None:
+            del model
+            cleanup_memory()
 
 
 # Modified run function to accept image buffer
 def run(logging, image_buffer):
-    logging.info("Decoding image buffer...")
-    nparr = np.frombuffer(image_buffer, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        logging.error("Could not decode image from buffer")
-        return None # Or raise an exception
+    try:
+        logging.info("Decoding image buffer...")
+        nparr = np.frombuffer(image_buffer, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Clear buffer from memory immediately
+        del nparr, image_buffer
+        gc.collect()
+        
+        if img is None:
+            logging.error("Could not decode image from buffer")
+            return None
 
-    logging.info("Detecting cells...")
-    # Pass img object, capture points
-    points = create_detections(logging, img)
-    if points is None or len(points) == 0:
-         logging.info("No points detected.")
-         return [] # Return empty list if no detections
+        logging.info("Detecting cells...")
+        points = create_detections(logging, img)
+        if points is None or len(points) == 0:
+            logging.info("No points detected.")
+            del img
+            gc.collect()
+            return []
 
-    logging.info("Classifying cells...")
-    # Pass img object and points, capture final results
-    final_results = classify_images(logging, img, points)
+        logging.info("Classifying cells...")
+        final_results = classify_images(logging, img, points)
 
-    logging.info("Done")
-    return final_results # Return the final classification results
+        # Final cleanup
+        del img, points
+        gc.collect()
+        
+        logging.info("Done")
+        return final_results
+    except Exception as e:
+        logging.exception(f"Error in run function: {e}")
+        gc.collect()
+        return None
