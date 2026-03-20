@@ -309,9 +309,12 @@ def classify_image(image, points, labels, net, img_size):
         blob_imgs = np.asarray([i for i in blob_imgs])
 
         # Limit maximum number of cells to process at once
-        max_cells = 2500
+        max_cells = MAX_CLASSIFICATION_CELLS
         if len(blob_imgs) > max_cells:
-            print(f"Large frame with {len(blob_imgs)} cells detected, processing first {max_cells} for memory efficiency")
+            print(
+                f"Large frame with {len(blob_imgs)} cells detected, "
+                f"processing first {max_cells} (MAX_CLASSIFICATION_CELLS) for memory efficiency"
+            )
             blob_imgs = blob_imgs[:max_cells]
             points = points[:max_cells]
 
@@ -584,6 +587,27 @@ def create_detections(logging, img):
             cleanup_memory()
 
 LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
+
+
+def _load_max_classification_cells():
+    """
+    Maximum number of detected cells to classify per frame.
+    Kept configurable because full-frame combs can exceed previous limits.
+    """
+    raw_value = os.environ.get("MAX_CLASSIFICATION_CELLS", "6000")
+    try:
+        parsed = int(raw_value)
+        if parsed <= 0:
+            raise ValueError("MAX_CLASSIFICATION_CELLS must be > 0")
+        return parsed
+    except Exception:
+        print(
+            f"Invalid MAX_CLASSIFICATION_CELLS={raw_value!r}; falling back to 6000"
+        )
+        return 6000
+
+
+MAX_CLASSIFICATION_CELLS = _load_max_classification_cells()
 
 
 # Modified classify_images to accept image object and points array

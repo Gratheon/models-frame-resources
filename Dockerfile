@@ -12,6 +12,7 @@ ENV TF_FORCE_GPU_ALLOW_GROWTH=true
 ENV TF_CPP_MIN_LOG_LEVEL=2
 ENV PYTHONUNBUFFERED=1
 ENV TF_ENABLE_ONEDNN_OPTS=0
+ENV MAX_CLASSIFICATION_CELLS=3200
 
 # System dependencies for OpenCV and scientific stack (h5py/SciPy build requirements)
 RUN apt-get update && apt-get install -y --no-install-recommends \

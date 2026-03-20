@@ -5,6 +5,7 @@ services:
     environment:
       ENV_ID: dev
       SERVICE_NAME: models-frame-resources
+      MAX_CLASSIFICATION_CELLS: 3200
       # Memory optimization settings (removed conflicting CUDA and TF settings)
       TF_FORCE_GPU_ALLOW_GROWTH: true
       TF_CPP_MIN_LOG_LEVEL: 2
