@@ -36,6 +36,7 @@ import warnings
 import imghdr
 from pathlib import PurePath
 import io # Added for in-memory buffer handling
+from threading import Lock
 
 warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -131,33 +132,54 @@ PATH_CL_MODEL_WEIGHTS = f'{ROOT}/src/DeepBee/software/model/classification.weigh
 MIN_CONFIDENCE = 0.9995
 
 LEFT_BAR_SIZE = 480
-img_size = 96   # Reduced from 224 to 96 (massive memory savings)
-batch_size = 4  # Reduced from 50 to 4 (ultra-small batches)
+
+
+def _load_positive_int_env(name, default):
+    raw_value = os.environ.get(name, str(default))
+    try:
+        parsed = int(raw_value)
+        if parsed <= 0:
+            raise ValueError(f"{name} must be > 0")
+        return parsed
+    except Exception:
+        print(f"Invalid {name}={raw_value!r}; falling back to {default}")
+        return default
+
+
+# Keep trained input size as default for precision; make configurable for constrained runtimes.
+img_size = _load_positive_int_env("CLASSIFICATION_IMG_SIZE", 224)
+classification_batch_size = _load_positive_int_env("CLASSIFICATION_BATCH_SIZE", 32)
 
 # Global model cache for lazy loading to fix idle memory usage
 _segmentation_model = None
 _classification_model = None
+_segmentation_model_lock = Lock()
+_classification_model_lock = Lock()
 
 def load_segmentation_model():
     """Lazy load segmentation model only when needed"""
     global _segmentation_model
     if _segmentation_model is None:
-        print("Loading segmentation model...")
-        with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
-            model_json = json_file.read()
-            _segmentation_model = model_from_json(model_json, custom_objects={"K": K})
-            _segmentation_model.load_weights(PATH_SEG_MODEL_WEIGHTS)
+        with _segmentation_model_lock:
+            if _segmentation_model is None:
+                print("Loading segmentation model...")
+                with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
+                    model_json = json_file.read()
+                    _segmentation_model = model_from_json(model_json, custom_objects={"K": K})
+                    _segmentation_model.load_weights(PATH_SEG_MODEL_WEIGHTS)
     return _segmentation_model
 
 def load_classification_model():
     """Lazy load classification model only when needed"""
     global _classification_model
     if _classification_model is None:
-        print("Loading classification model...")
-        with open(PATH_CL_MODEL_JSON, 'r') as json_file:
-            model_json = json_file.read()
-            _classification_model = model_from_json(model_json, custom_objects={"K": K})
-            _classification_model.load_weights(PATH_CL_MODEL_WEIGHTS)
+        with _classification_model_lock:
+            if _classification_model is None:
+                print("Loading classification model...")
+                with open(PATH_CL_MODEL_JSON, 'r') as json_file:
+                    model_json = json_file.read()
+                    _classification_model = model_from_json(model_json, custom_objects={"K": K})
+                    _classification_model.load_weights(PATH_CL_MODEL_WEIGHTS)
     return _classification_model
 
 def unload_models():
@@ -259,7 +281,7 @@ def extract_circles(
         # use the mean radius to calculate the clip size to each detection
         pts[:, 2] = output_size / mean_radius_default * pts[:, 2]
         # the border needs to be greater than the biggest clip
-        size_border = pts[:, 2].max() + 1
+        size_border = int(pts[:, 2].max() + 1)
         # deslocates the detection centers
         pts[:, [0, 1]] = pts[:, [0, 1]] + size_border
 
@@ -277,12 +299,54 @@ def extract_circles(
         ROIs = [
             cv2.resize(
                 img_w_border[i[1] - i[2] : i[1] + i[2], i[0] - i[2] : i[0] + i[2]],
-                (224, 224),
+                (output_size, output_size),
             )
             for i in pts
         ]
 
     return ROIs
+
+
+def extract_circles_batches(
+    image,
+    pts,
+    output_size=224,
+    mean_radius_default=32,
+    standardize_radius=True,
+    batch_size=32,
+):
+    """
+    Yield extracted circle crops in batches to avoid building a full tensor for all cells.
+    """
+    if not standardize_radius or len(pts) == 0:
+        return
+
+    pts_local = np.copy(pts)
+    pts_local[:, 2] = output_size / mean_radius_default * pts_local[:, 2]
+    pts_local[:, 2] = np.maximum(pts_local[:, 2], 1).astype(np.int32)
+
+    size_border = int(pts_local[:, 2].max() + 1)
+    pts_local[:, [0, 1]] = pts_local[:, [0, 1]] + size_border
+
+    img_w_border = cv2.copyMakeBorder(
+        image,
+        size_border,
+        size_border,
+        size_border,
+        size_border,
+        cv2.BORDER_REFLECT,
+    )
+
+    for start in range(0, len(pts_local), batch_size):
+        batch_pts = pts_local[start : start + batch_size]
+        batch_rois = [
+            cv2.resize(
+                img_w_border[p[1] - p[2] : p[1] + p[2], p[0] - p[2] : p[0] + p[2]],
+                (output_size, output_size),
+            )
+            for p in batch_pts
+        ]
+        yield np.asarray(batch_rois), start, len(batch_pts)
 
 
 # Corrected classify_image signature and removed obsolete file operations
@@ -300,56 +364,49 @@ def classify_image(image, points, labels, net, img_size):
         pt = np.copy(points)
         pt[:, 2] = pt[:, 2] // 2
 
-        print("extract_circles (ultra-memory-optimized)")
-        blob_imgs = extract_circles(image_rgb, np.copy(pt), output_size=img_size)
-        
-        if not blob_imgs:
-            return np.array([])
-            
-        blob_imgs = np.asarray([i for i in blob_imgs])
-
         # Limit maximum number of cells to process at once
         max_cells = MAX_CLASSIFICATION_CELLS
-        if len(blob_imgs) > max_cells:
+        if len(pt) > max_cells:
             print(
-                f"Large frame with {len(blob_imgs)} cells detected, "
+                f"Large frame with {len(pt)} cells detected, "
                 f"processing first {max_cells} (MAX_CLASSIFICATION_CELLS) for memory efficiency"
             )
-            blob_imgs = blob_imgs[:max_cells]
             points = points[:max_cells]
+            pt = pt[:max_cells]
 
-        print("preprocess_input (memory-safe)")
-        try:
-            blob_imgs = preprocess_input(blob_imgs.astype(np.float32))
-        except:
-            blob_imgs = blob_imgs.astype(np.float32) / 255.0
-
-        # Ultra-small micro-batches
-        micro_batch_size = 16
-        all_scores = []
-        
-        print(f"Processing {len(blob_imgs)} cells in micro-batches of {micro_batch_size}")
-        
-        for i in range(0, len(blob_imgs), micro_batch_size):
-            chunk = blob_imgs[i:i+micro_batch_size]
-            try:
-                chunk_scores = net.predict(chunk, verbose=0, batch_size=2)
-                all_scores.append(chunk_scores)
-                del chunk_scores
-            except Exception as e:
-                print(f"Micro-batch {i//micro_batch_size + 1} failed: {e}")
-                dummy_scores = np.zeros((len(chunk), 7))
-                all_scores.append(dummy_scores)
-            
-            del chunk
-            gc.collect()
-
-        if not all_scores:
+        num_points = len(points)
+        if num_points == 0:
             return np.array([])
-            
-        scores = np.vstack(all_scores)
-        del all_scores, blob_imgs
-        gc.collect()
+
+        print(
+            f"Processing {num_points} cells in streaming batches of {classification_batch_size}"
+        )
+
+        class_count = int(net.output_shape[-1])
+        scores = np.zeros((num_points, class_count), dtype=np.float32)
+
+        for batch_imgs, start, batch_len in extract_circles_batches(
+            image_rgb,
+            pt,
+            output_size=img_size,
+            batch_size=classification_batch_size,
+        ):
+            try:
+                batch_imgs = batch_imgs.astype(np.float32)
+                try:
+                    batch_imgs = preprocess_input(batch_imgs)
+                except Exception:
+                    batch_imgs = batch_imgs / 255.0
+
+                chunk_scores = net.predict(
+                    batch_imgs,
+                    verbose=0,
+                    batch_size=batch_len,
+                )
+                scores[start : start + batch_len] = chunk_scores
+            except Exception as e:
+                print(f"Classification batch {start // classification_batch_size + 1} failed: {e}")
+                # Keep zeroed logits for this chunk so request can complete.
 
         lb_predictions = np.argmax(scores, axis=1)
         vals_predictions = np.amax(scores, axis=1)
@@ -359,14 +416,10 @@ def classify_image(image, points, labels, net, img_size):
         csl = np.vstack([new_class, vals_predictions]).T
         points_pred = np.hstack((points_pred, csl))
 
-        del scores, lb_predictions, vals_predictions
-        gc.collect()
-        
         return points_pred
         
     except Exception as e:
         print(f"Classification failed: {e}")
-        gc.collect()
         return np.array([])
 
 
@@ -412,26 +465,18 @@ def segmentation(img, model):
         batch_end = min(batch_start + ultra_micro_batch_size, len(slices))
         batch_slices = slices[batch_start:batch_end]
         
-        print(f"Processing ultra-micro-batch {batch_start//ultra_micro_batch_size + 1}/{(len(slices) + ultra_micro_batch_size - 1)//ultra_micro_batch_size}")
-        
         X = np.zeros((len(batch_slices), IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS), dtype=np.uint8)
         
         for j, sl in enumerate(batch_slices):
             X[j] = cv2.resize(reflect[sl], (IMG_HEIGHT, IMG_WIDTH), interpolation=cv2.INTER_AREA)
         
-        batch_preds = model.predict(X, verbose=0, batch_size=1)  # Single item batches
-        batch_preds = (batch_preds > 0.5).astype(np.uint8)
+        batch_preds = model.predict(X, verbose=0, batch_size=1)
         all_preds.append(batch_preds)
-        
-        del X, batch_preds
-        gc.collect()
     
     preds = np.vstack(all_preds)
-    del all_preds
-    gc.collect()
 
     RESULT_Y = np.zeros(
-        (len(preds), IMG_HEIGHT_DEST, IMG_WIDTH_DEST, 1), dtype=np.uint8
+        (len(preds), IMG_HEIGHT_DEST, IMG_WIDTH_DEST, 1), dtype=np.float32
     )
 
     for j, x in enumerate(preds):
@@ -440,23 +485,20 @@ def segmentation(img, model):
             axis=-1,
         )
     
-    del preds
-    gc.collect()
-
+    reconstructed_prob = np.squeeze(np.hstack([np.vstack(i) for i in np.split(RESULT_Y, 13)]))[
+        169:4169, 133:6133
+    ]
     reconstructed_mask = (
-        np.squeeze(np.hstack([np.vstack(i) for i in np.split(RESULT_Y, 13)]))[
-            169:4169, 133:6133
-        ]
+        (reconstructed_prob > 0.5).astype(np.uint8)
         * 255
     )
-    
-    del RESULT_Y
-    gc.collect()
 
     print("Resizing image")
     if original_shape != (4000, 6000):
         reconstructed_mask = cv2.resize(
-            reconstructed_mask, (original_shape[1], original_shape[0])
+            reconstructed_mask,
+            (original_shape[1], original_shape[0]),
+            interpolation=cv2.INTER_NEAREST,
         )
 
     # remove internal areas
@@ -568,23 +610,10 @@ def find_circles(logging, img, mask, cnt):
 # Modified create_detections to accept image object instead of filename/dir
 def create_detections(logging, img):
     logging.info("loading segmentation model...")
-    model = None
-    try:
-        with open(PATH_SEG_MODEL_JSON, 'r') as json_file:
-            model_json = json_file.read()
-            model = model_from_json(model_json, custom_objects={"K": K})
-            model.load_weights(PATH_SEG_MODEL_WEIGHTS)
-
-        mask, cnt = segmentation(img, model)
-        points = find_circles(logging, img, mask, cnt)
-        
-        del mask
-        gc.collect()
-        return points
-    finally:
-        if model is not None:
-            del model
-            cleanup_memory()
+    model = load_segmentation_model()
+    mask, cnt = segmentation(img, model)
+    points = find_circles(logging, img, mask, cnt)
+    return points
 
 LABELS = ["Capped", "Eggs", "Honey", "Larves", "Nectar", "Other", "Pollen"]
 
@@ -613,19 +642,9 @@ MAX_CLASSIFICATION_CELLS = _load_max_classification_cells()
 # Modified classify_images to accept image object and points array
 def classify_images(logging, img, points):
     logging.info("loading classification model...")
-    model = None
-    try:
-        with open(PATH_CL_MODEL_JSON, 'r') as json_file:
-            model_json = json_file.read()
-            model = model_from_json(model_json, custom_objects={"K": K})
-            model.load_weights(PATH_CL_MODEL_WEIGHTS)
-
-        final_results = classify_image(img, points, LABELS, model, img_size)
-        return final_results
-    finally:
-        if model is not None:
-            del model
-            cleanup_memory()
+    model = load_classification_model()
+    final_results = classify_image(img, points, LABELS, model, img_size)
+    return final_results
 
 
 # Modified run function to accept image buffer
@@ -637,7 +656,6 @@ def run(logging, image_buffer):
         
         # Clear buffer from memory immediately
         del nparr, image_buffer
-        gc.collect()
         
         if img is None:
             logging.error("Could not decode image from buffer")
@@ -647,20 +665,13 @@ def run(logging, image_buffer):
         points = create_detections(logging, img)
         if points is None or len(points) == 0:
             logging.info("No points detected.")
-            del img
-            gc.collect()
             return []
 
         logging.info("Classifying cells...")
         final_results = classify_images(logging, img, points)
 
-        # Final cleanup
-        del img, points
-        gc.collect()
-        
         logging.info("Done")
         return final_results
     except Exception as e:
         logging.exception(f"Error in run function: {e}")
-        gc.collect()
         return None
