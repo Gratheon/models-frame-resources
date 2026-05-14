@@ -4,6 +4,7 @@ scipy==1.10.1
 
 Pillow==9.4.0
 Flask==2.0.2
+gratheon-log-lib @ https://github.com/Gratheon/log-lib-py/archive/03b30ba.zip
 
 opencv-python-headless==4.7.0.72
 

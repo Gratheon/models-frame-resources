@@ -13,6 +13,12 @@ Based on DeepBee project. With some changes:
 just start
 ```
 
+The service uses the shared Python logger directly from GitHub via [`requirements.txt`](/Users/artjom/git/gratheon/models-frame-resources/requirements.txt):
+
+```txt
+gratheon-log-lib @ https://github.com/Gratheon/log-lib-py/archive/03b30ba.zip
+```
+
 ## Architecture
 
 ### Services

@@ -1,16 +1,66 @@
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import json
 import cgi
-import logging
 import numpy as np
 import gc  # Added for memory optimization
+import time
+
+from gratheon_log_lib import bind_context, clear_context, configure, error_enriched, info, warn
 from src.DeepBee.software.detection_and_classification import run
 
-# Configure logging with memory-conscious settings
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+configure()
+
+
+class LogAdapter:
+    def info(self, message, meta=None):
+        info(str(message), meta)
+
+    def warn(self, message, meta=None):
+        warn(str(message), meta)
+
+    def warning(self, message, meta=None):
+        warn(str(message), meta)
+
+    def error(self, message, *args):
+        if args:
+            meta = {"args": [str(arg) for arg in args]}
+        else:
+            meta = None
+        error_enriched(str(message), Exception(str(message)), meta)
+
+    def exception(self, message, *args):
+        if args and isinstance(args[-1], BaseException):
+            meta = {"args": [str(arg) for arg in args[:-1]]} if len(args) > 1 else None
+            error_enriched(str(message), args[-1], meta)
+            return
+        error_enriched(str(message), Exception(str(message)))
+
+
+logger = LogAdapter()
+
 
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        info(
+            "http access log",
+            {
+                "remote_addr": self.address_string(),
+                "request_line": self.requestline,
+                "message": format % args,
+            },
+        )
+
     def do_GET(self):
+        request_id = str(time.time_ns())[-8:]
+        bind_context(request_id=request_id)
+        info(
+            "serving upload form",
+            {
+                "path": self.path,
+                "method": "GET",
+                "remote_addr": self.client_address[0] if self.client_address else None,
+            },
+        )
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
@@ -26,11 +76,25 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
         </html>
         '''
         self.wfile.write(form_html.encode('utf-8'))
+        clear_context()
 
     def do_POST(self):
+        request_id = str(time.time_ns())[-8:]
+        bind_context(request_id=request_id)
+        started_at = time.perf_counter()
         content_type = self.headers['Content-Type']
+        info(
+            "incoming frame-resources request",
+            {
+                "path": self.path,
+                "method": "POST",
+                "remote_addr": self.client_address[0] if self.client_address else None,
+                "content_type": content_type,
+                "content_length": self.headers.get('Content-Length'),
+            },
+        )
 
-        if content_type.startswith('multipart/form-data'):
+        if content_type and content_type.startswith('multipart/form-data'):
             try:
                 # Parse the form data
                 form_data = cgi.FieldStorage(
@@ -41,6 +105,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
                 # Check if 'file' field exists
                 if "file" not in form_data:
+                    warn("rejecting request, missing file field")
                     self.send_response(400)
                     self.send_header("Content-type", "application/json")
                     self.end_headers()
@@ -52,6 +117,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
                 # Check if it's a valid file upload
                 if not isinstance(file_field, cgi.FieldStorage) or not file_field.filename:
+                    warn("rejecting request, invalid file upload")
                     self.send_response(400)
                     self.send_header("Content-type", "application/json")
                     self.end_headers()
@@ -60,8 +126,14 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                     return
 
                 # Read file content into memory
-                logging.info(f"Processing uploaded image: {file_field.filename}")
+                info(
+                    "processing uploaded image",
+                    {
+                        "filename": file_field.filename,
+                    },
+                )
                 image_data = file_field.file.read()
+                info("image payload loaded", {"image_bytes": len(image_data)})
 
                 # Clear form data from memory immediately after reading
                 del form_data, file_field
@@ -69,7 +141,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
                 # Call run with image_buffer
                 result = run(
-                    logging=logging,
+                    logging=logger,
                     image_buffer=image_data,
                 )
 
@@ -91,6 +163,15 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                     response_data = {'message': 'Nothing found', 'result': []}
                     response_body = json.dumps(response_data).encode('utf-8')
 
+                duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+                info(
+                    "frame-resources request processed",
+                    {
+                        "result_count": len(response_data.get('result', [])),
+                        "duration_ms": duration_ms,
+                    },
+                )
+
                 # Clear result from memory
                 del result
                 gc.collect()
@@ -101,7 +182,7 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(response_body)
 
             except Exception as e:
-                logging.exception(f"Error processing image: {e}")
+                error_enriched("error processing image", e)
 
                 # Force garbage collection on error
                 gc.collect()
@@ -111,12 +192,16 @@ class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 error_response = {'message': 'Error processing image', 'error': str(e)}
                 self.wfile.write(json.dumps(error_response).encode('utf-8'))
+            finally:
+                clear_context()
         else:
+            warn("rejecting request, unsupported content type", {"content_type": content_type})
             self.send_response(415)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             response = {'message': 'Unsupported content type. Please use multipart/form-data.'}
             self.wfile.write(json.dumps(response).encode('utf-8'))
+            clear_context()
 
 
 # Create an HTTP server with memory-optimized settings
@@ -127,10 +212,10 @@ httpd = ThreadingHTTPServer(server_address, SimpleHTTPRequestHandler)
 httpd.timeout = 300  # 5 minute timeout to prevent hanging requests
 httpd.allow_reuse_address = True
 
-print('Sserver running on port 8540...')
+info('starting frame-resources server', {"port": 8540})
 
 try:
     httpd.serve_forever()
 except KeyboardInterrupt:
-    print("Shutting down server...")
+    info("shutting down frame-resources server")
     httpd.shutdown()
