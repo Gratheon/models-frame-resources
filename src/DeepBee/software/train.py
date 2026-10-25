@@ -117,7 +117,7 @@ def save_image(data):
 
 def find_image_names():
     l_images = []
-    for path, subdirs, files in os.walk(PATH_IMGS):
+    for path, _subdirs, files in os.walk(PATH_IMGS):
         for name in files:
             full_path = os.path.join(path, name)
             if imghdr.what(full_path) is not None:
