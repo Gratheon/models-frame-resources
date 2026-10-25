@@ -31,7 +31,7 @@ def cross_plataform_directory():
 
 def find_image_names():
     l_images = []
-    for path, subdirs, files in os.walk(PATH_IMAGES):
+    for path, _subdirs, files in os.walk(PATH_IMAGES):
         for name in files:
             full_path = os.path.join(path, name)
             if imghdr.what(full_path) is not None:

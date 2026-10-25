@@ -3,7 +3,6 @@
 Patch script to fix bad marshal data error in Lambda layers
 """
 
-import re
 
 # Read the original file
 with open('src/DeepBee/software/detection_and_classification.py', 'r') as f:

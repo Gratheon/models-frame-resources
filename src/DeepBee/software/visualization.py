@@ -256,7 +256,7 @@ def generate_left_bar_image(saving=False):
 
 def find_image_names():
     l_images = []
-    for path, subdirs, files in os.walk(IMAGES_PATH):
+    for path, _subdirs, files in os.walk(IMAGES_PATH):
         for name in files:
             full_path = os.path.join(path, name)
             if imghdr.what(full_path) is not None:

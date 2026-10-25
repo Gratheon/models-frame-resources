@@ -9,8 +9,6 @@ Created on Tue Mar 27 21:34:46 2018
 import numpy as np
 import cv2
 import os
-import h5py
-import json
 import gc  # Added for explicit garbage collection
 
 # Memory optimization: Configure TensorFlow before importing
@@ -24,18 +22,14 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 # os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
 
 import tensorflow.keras.backend as K
-from tensorflow.keras.models import model_from_json, load_model
+from tensorflow.keras.models import model_from_json
 # from keras.models import load_model, model_from_json
 
 from keras.applications.imagenet_utils import preprocess_input
 
 import math
 from collections import Counter
-import datetime
 import warnings
-import imghdr
-from pathlib import PurePath
-import io # Added for in-memory buffer handling
 from threading import Lock
 
 warnings.filterwarnings("ignore")
